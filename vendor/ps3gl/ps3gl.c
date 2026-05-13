@@ -1054,16 +1054,16 @@ GLAPI void APIENTRY glBlitFramebuffer (GLint srcX0, GLint srcY0, GLint srcX1, GL
 				_opengl_state.bound_draw_framebuffer->gcmSurface.colorOffset[0] :
 				color_offset[curr_fb], // dstOffset
 				_opengl_state.bound_draw_framebuffer != NULL ? 
-				_opengl_state.bound_draw_framebuffer->gcmSurface.width*4 :
-				display_width*4, // dstPitch
+				_opengl_state.bound_draw_framebuffer->gcmSurface.colorPitch[0] :
+				color_pitch, // dstPitch
 				dstX1-dstX0, // dstX
 				dstY1-dstY0, // dstY
 				_opengl_state.bound_read_framebuffer != NULL ? 
 				_opengl_state.bound_read_framebuffer->gcmSurface.colorOffset[0] :
 				color_offset[curr_fb^1], // srcOffset
 				_opengl_state.bound_read_framebuffer != NULL ? 
-				_opengl_state.bound_read_framebuffer->gcmSurface.width*4 :
-				display_width*4, // dstPitch
+				_opengl_state.bound_read_framebuffer->gcmSurface.colorPitch[0] :
+				color_pitch, // dstPitch
 				srcX0, // srcX 
 				srcY0, //  srcY
 				srcX1-srcX0, // width
@@ -1079,11 +1079,11 @@ GLenum glCheckFramebufferStatus (GLenum target) {
 // glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gl->surfaceTexture[surfaceID], 0);
 // TODO: Assumes target = GL_FRAMEBUFFER, attachment = GL_COLOR_ATTACHMENT0, textarget = GL_TEXTURE_2D and level = 0;
 void glFramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) {
-	struct ps3gl_texture tx = _opengl_state.textures[texture];
-	_opengl_state.bound_draw_framebuffer->fbTexture = &_opengl_state.textures[texture];
+	struct ps3gl_texture *tx = &_opengl_state.textures[texture];
+	_opengl_state.bound_draw_framebuffer->fbTexture = tx;
 
 	// If framebuffer don't swap channels
-	tx.gcmTexture.remap  = (
+	tx->gcmTexture.remap  = (
 				   (GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_A_SHIFT) |
 				   (GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_R_SHIFT) |
 				   (GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_G_SHIFT) |
@@ -1099,10 +1099,10 @@ void glFramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget,
 	sf.colorFormat		= GCM_SURFACE_A8R8G8B8;
 	sf.colorTarget		= GCM_SURFACE_TARGET_0;
 	sf.colorLocation[0]	= GCM_LOCATION_RSX;
-	sf.colorOffset[0]	= tx.gcmTexture.offset;
-	sf.colorPitch[0]	= tx.gcmTexture.width*4;
-	sf.width			= tx.gcmTexture.width;
-	sf.height			= tx.gcmTexture.height;
+	sf.colorOffset[0]	= tx->gcmTexture.offset;
+	sf.colorPitch[0]	= tx->gcmTexture.width*sizeof(uint32_t);
+	sf.width			= tx->gcmTexture.width;
+	sf.height			= tx->gcmTexture.height;
 
 	// This is wrong but i dont think i can skip a depth attachment
 	/*
