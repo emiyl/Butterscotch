@@ -1061,14 +1061,14 @@ GLAPI void APIENTRY glBlitFramebuffer (GLint srcX0, GLint srcY0, GLint srcX1, GL
   scale.clipH = dstY1-dstY0;
   scale.outX = dstX0;
   scale.outY = dstY0;
-  scale.outW = dstX1-dstX0;
-  scale.outH = dstY1-dstY0;
+  scale.outW = (dstX1-dstX0);
+  scale.outH = (dstY1-dstY0);
   scale.ratioX = ((srcX1 - srcX0) << 20) / (float)(dstX1 - dstX0);
   scale.ratioY = ((srcY1 - srcY0) << 20) / (float)(dstY1 - dstY0);
   scale.inX = srcX0 << 4;
   scale.inY = srcY0 << 4;
-  scale.inW = srcX1-srcX0;
-  scale.inH = srcY1-srcY0;
+  scale.inW = (((dstX1-dstX0) << 20) / (float)(srcX1-srcX0));
+  scale.inH = (((dstY1-dstX0) << 20) / (float)(srcX1-srcX0));
   scale.offset = _opengl_state.bound_read_framebuffer != NULL ? 
 				_opengl_state.bound_read_framebuffer->gcmSurface.colorOffset[0] :
 				color_offset[curr_fb^1];
