@@ -1080,7 +1080,7 @@ GLAPI void APIENTRY glBlitFramebuffer (GLint srcX0, GLint srcY0, GLint srcX1, GL
   surface.pitch = _opengl_state.bound_draw_framebuffer != NULL ? 
 				_opengl_state.bound_draw_framebuffer->gcmSurface.colorPitch[0] :
 				color_pitch;
-  surface.offset = _opengl_state.bound_draq_framebuffer != NULL ? 
+  surface.offset = _opengl_state.bound_draw_framebuffer != NULL ?
 				_opengl_state.bound_draw_framebuffer->gcmSurface.colorPitch[0] :
 				color_pitch;
 
