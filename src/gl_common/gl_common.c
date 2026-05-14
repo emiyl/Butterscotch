@@ -113,8 +113,12 @@ void GLCommon_surfaceBlit(GLuint mainFbo, int32_t mainFboWidth, int32_t mainFboH
 
     if (part) {
         // GL Y is bottom-up; convert GML's top-down (srcX, srcY) source rect.
+#ifndef PLATFORM_PS3
         int32_t srcY0 = srcFboH - srcY - srcH;
         glBlitFramebuffer(srcX, srcY0, srcX + srcW, srcY0 + srcH, dstX, dstY, dstX + srcW, dstY + srcH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+#else
+        glBlitFramebuffer(srcX, srcY, srcX + srcW, srcY + srcH, dstX, dstY, dstX + srcW, dstY + srcH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+#endif   
     } else {
         glBlitFramebuffer(0, 0, srcFboW, srcFboH, dstX, dstY, dstX + srcFboW, dstY + srcFboH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     }
@@ -140,6 +144,7 @@ bool GLCommon_surfaceGetPixels(GLuint* surfaces, int32_t* surfaceWidth, int32_t*
     glBindFramebuffer(GL_FRAMEBUFFER, surfaces[surfaceId]);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
+#ifndef PLATFORM_PS3
     uint8_t* tmp = safeMalloc((size_t) w * (size_t) h * 4);
     glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
 
@@ -149,6 +154,9 @@ bool GLCommon_surfaceGetPixels(GLuint* surfaces, int32_t* surfaceWidth, int32_t*
         memcpy(outRGBA + (size_t) py * (size_t) rowBytes, tmp + (size_t) (h - 1 - py) * (size_t) rowBytes, (size_t) rowBytes);
     }
     free(tmp);
+#else
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, outRGBA);
+#endif
 
     glPixelStorei(GL_PACK_ALIGNMENT, prevPackAlign);
     glBindFramebuffer(GL_FRAMEBUFFER, (GLuint) prevFbo);
