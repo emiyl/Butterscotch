@@ -1203,7 +1203,7 @@ void glReadPixels( GLint x, GLint y,
 		size_t srcRowBytes = width*4;
 		size_t dstRowBytes = (size_t) width * 4;
 		for(size_t row = 0; row < height; row++) {
-			const uint8_t* srcLine = src + ((size_t) (y + row)) * srcRowBytes + (size_t) (x * 4);
+			const uint8_t* srcLine = src + ((size_t) y + (height - row)) * srcRowBytes + (size_t) (x * 4);
 			uint8_t* dstLine = pixels + (size_t) row * dstRowBytes;
 			for(size_t px = 0; px < width; px++) {
 				// Swizzle from ARGB to RGBA
