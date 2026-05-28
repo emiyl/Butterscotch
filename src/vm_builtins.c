@@ -9319,6 +9319,119 @@ static RValue builtin_action_if_health(VMContext* ctx, MAYBE_UNUSED RValue* args
     return RValue_makeBool(result);
 }
 
+// action_if_aligned(hsnap, vsnap) - Returns true if self.x is a multiple of hsnap AND self.y is a multiple of vsnap.
+// A snap value <= 0 disables that axis check.
+static RValue builtin_action_if_aligned(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Instance* self = ctx->currentInstance;
+    if (self == nullptr) return RValue_makeBool(false);
+
+    GMLReal hsnap = RValue_toReal(args[0]);
+    GMLReal vsnap = RValue_toReal(args[1]);
+
+    if (hsnap > 0.0) {
+        GMLReal q = self->x / hsnap;
+        GMLReal rounded = (GMLReal) (long) (q + (q >= 0.0 ? 0.5 : -0.5));
+        if (((self->x - hsnap * rounded) > 0.001) || (-0.001 > (self->x - hsnap * rounded))) return RValue_makeBool(false);
+    }
+    if (vsnap > 0.0) {
+        GMLReal q = self->y / vsnap;
+        GMLReal rounded = (GMLReal) (long) (q + (q >= 0.0 ? 0.5 : -0.5));
+        if (((self->y - vsnap * rounded) > 0.001) || (-0.001 > (self->y - vsnap * rounded))) return RValue_makeBool(false);
+    }
+    return RValue_makeBool(true);
+}
+
+// action_if_collision(x, y, kind)
+// * kind 0: "only solid": returns true if NOT place_free (there's a solid collision)
+// * kind 1: "all": returns true if NOT place_empty (there's any collision)
+// When relative flag is set, x/y are offsets from self.
+static RValue builtin_action_if_collision(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Instance* self = ctx->currentInstance;
+    if (self == nullptr) return RValue_makeBool(false);
+
+    float x = (float) RValue_toReal(args[0]);
+    float y = (float) RValue_toReal(args[1]);
+    int32_t kind = RValue_toInt32(args[2]);
+    applyActionRelativeOffset(ctx, &x, &y);
+
+    RValue posArgs[2] = { RValue_makeReal((GMLReal) x), RValue_makeReal((GMLReal) y) };
+    RValue inner = (kind == 0) ? builtin_place_free(ctx, posArgs, 2) : builtin_place_empty(ctx, posArgs, 2);
+    return RValue_makeBool(!RValue_toBool(inner));
+}
+
+// action_if_empty(x, y, kind)
+// * kind 0: returns place_free(x, y)
+// * kind 1: returns place_empty(x, y)
+static RValue builtin_action_if_empty(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Instance* self = ctx->currentInstance;
+    if (self == nullptr) return RValue_makeBool(true);
+
+    float x = (float) RValue_toReal(args[0]);
+    float y = (float) RValue_toReal(args[1]);
+    int32_t kind = RValue_toInt32(args[2]);
+    applyActionRelativeOffset(ctx, &x, &y);
+
+    RValue posArgs[2] = { RValue_makeReal((GMLReal) x), RValue_makeReal((GMLReal) y) };
+    return (kind == 0) ? builtin_place_free(ctx, posArgs, 2) : builtin_place_empty(ctx, posArgs, 2);
+}
+
+// action_if_object(obj, x, y)
+// Returns true if the self instance, moved to (x, y), would be touching an instance of obj.
+// Equivalent to place_meeting(x, y, obj). Relative flag offsets x/y from self.
+static RValue builtin_action_if_object(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Instance* self = ctx->currentInstance;
+    if (self == nullptr) return RValue_makeBool(false);
+
+    int32_t obj = RValue_toInt32(args[0]);
+    float x = (float) RValue_toReal(args[1]);
+    float y = (float) RValue_toReal(args[2]);
+    applyActionRelativeOffset(ctx, &x, &y);
+
+    RValue meetArgs[3] = { RValue_makeReal((GMLReal) x), RValue_makeReal((GMLReal) y), RValue_makeReal((GMLReal) obj) };
+    return builtin_place_meeting(ctx, meetArgs, 3);
+}
+
+// action_if_number(obj, number, op)
+// * op 0: instance_number(obj) == number
+// * op 1: instance_number(obj) < number
+// * op 2: instance_number(obj) > number
+static RValue builtin_action_if_number(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    GMLReal value = RValue_toReal(args[1]);
+    int32_t op = RValue_toInt32(args[2]);
+
+    RValue numArgs[1] = { args[0] };
+    GMLReal count = RValue_toReal(builtin_instance_number(ctx, numArgs, 1));
+
+    bool result;
+    if (op == LEGACY_DND_CMP_LT) result = count < value;
+    else if (op == LEGACY_DND_CMP_GT) result = count > value;
+    else result = count == value;
+    return RValue_makeBool(result);
+}
+
+// action_if_next_room()
+// Returns true if there IS a room after the current one in room order.
+static RValue builtin_action_if_next_room(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = ctx->runner;
+    uint32_t count = runner->dataWin->gen8.roomOrderCount;
+    if (count == 0) return RValue_makeBool(false);
+    int32_t lastRoom = runner->dataWin->gen8.roomOrder[count - 1];
+    return RValue_makeBool(runner->currentRoomIndex != lastRoom);
+}
+
+// action_if_previous_room()
+// Returns true if there IS a room before the current one in room order.
+static RValue builtin_action_if_previous_room(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = ctx->runner;
+    uint32_t count = runner->dataWin->gen8.roomOrderCount;
+    if (count == 0) return RValue_makeBool(false);
+    int32_t firstRoom = runner->dataWin->gen8.roomOrder[0];
+    return RValue_makeBool(runner->currentRoomIndex != firstRoom);
+}
+
+STUB_RETURN_FALSE(action_if_mouse)
+STUB_RETURN_FALSE(action_if_question)
+
 // DnD "back" / "bar" color preset in BGR format enum used by action_draw_health.
 // Indices match the GMS 1.x DnD dropdowns:
 // Stored as BGR (GameMaker color order) so they can be passed straight to the renderer.
@@ -12343,6 +12456,15 @@ void VMBuiltins_registerAll(VMContext* ctx) {
         VM_registerBuiltin(ctx, "action_draw_life_images", builtin_action_draw_life_images);
         VM_registerBuiltin(ctx, "action_set_health", builtin_action_set_health);
         VM_registerBuiltin(ctx, "action_if_health", builtin_action_if_health);
+        VM_registerBuiltin(ctx, "action_if_aligned", builtin_action_if_aligned);
+        VM_registerBuiltin(ctx, "action_if_collision", builtin_action_if_collision);
+        VM_registerBuiltin(ctx, "action_if_empty", builtin_action_if_empty);
+        VM_registerBuiltin(ctx, "action_if_object", builtin_action_if_object);
+        VM_registerBuiltin(ctx, "action_if_number", builtin_action_if_number);
+        VM_registerBuiltin(ctx, "action_if_next_room", builtin_action_if_next_room);
+        VM_registerBuiltin(ctx, "action_if_previous_room", builtin_action_if_previous_room);
+        VM_registerBuiltin(ctx, "action_if_mouse", builtin_action_if_mouse);
+        VM_registerBuiltin(ctx, "action_if_question", builtin_action_if_question);
         VM_registerBuiltin(ctx, "action_draw_health", builtin_action_draw_health);
         VM_registerBuiltin(ctx, "action_sprite_set", builtin_action_sprite_set);
         VM_registerBuiltin(ctx, "action_message", builtin_action_message);
