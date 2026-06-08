@@ -2986,6 +2986,10 @@ static uint32_t gsSpriteGetTexture(Renderer* renderer, int32_t tpagIndex) {
     return (uint32_t) (tpagIndex + 1);
 }
 
+static uint32_t gsSurfaceGetTexture(MAYBE_UNUSED Renderer* renderer, MAYBE_UNUSED int32_t surfaceID) {
+    return 0;
+}
+
 static float gsTextureGetTexelWidth(Renderer* renderer, uint32_t texHandle) {
     GsRenderer* gs = (GsRenderer*) renderer;
     uint16_t pw, ph, sx, sy, sw, sh;
@@ -3073,6 +3077,7 @@ static RendererVtable gsVtable = {
     .surfaceCopy = gsSurfaceCopy,
     .surfaceGetPixels = gsSurfaceGetPixels,
     .spriteGetTexture = gsSpriteGetTexture,
+    .surfaceGetTexture = gsSurfaceGetTexture,
     .textureGetTexelWidth = gsTextureGetTexelWidth,
     .textureGetTexelHeight = gsTextureGetTexelHeight,
     .textureGetUVs = gsTextureGetUVs,

@@ -9004,6 +9004,15 @@ static RValue builtin_surface_get_height(VMContext* ctx, RValue* args, MAYBE_UNU
     return RValue_makeReal(Renderer_getSurfaceHeight(runner->renderer, surfaceId));
 }
 
+static RValue builtin_surface_get_texture(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    int32_t surfaceId = (int32_t) RValue_toReal(args[0]);
+    Runner* runner = ctx->runner;
+    if (runner != nullptr && runner->renderer != nullptr && runner->renderer->vtable->surfaceGetTexture != nullptr) {
+        return RValue_makeInt32((int32_t) runner->renderer->vtable->surfaceGetTexture(runner->renderer, surfaceId));
+    }
+    return RValue_makeInt32(-1);
+}
+
 // Sprite functions
 static RValue builtin_sprite_add(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
     logStubbedFunction(ctx, "sprite_add");
@@ -13827,6 +13836,7 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "surface_exists", builtin_surface_exists);
     VM_registerBuiltin(ctx, "surface_get_width", builtin_surface_get_width);
     VM_registerBuiltin(ctx, "surface_get_height", builtin_surface_get_height);
+    VM_registerBuiltin(ctx, "surface_get_texture", builtin_surface_get_texture);
     VM_registerBuiltin(ctx, "surface_resize", builtin_surface_resize);
     VM_registerBuiltin(ctx, "surface_copy", builtin_surface_copy);
     VM_registerBuiltin(ctx, "surface_copy_part", builtin_surface_copy_part);

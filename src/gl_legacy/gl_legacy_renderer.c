@@ -1582,6 +1582,14 @@ static bool glLegacySurfaceGetPixels(Renderer* renderer, int32_t surfaceId, uint
 // Returns false for the 0 ("no texture") handle or an unresolvable one.
 static bool glLegacyResolveTextureHandle(GLLegacyRenderer* gl, uint32_t texHandle, TexturePageItem** outTpag, int32_t* outW, int32_t* outH) {
     if (texHandle == 0) return false;
+    if (texHandle & GL_SURFACE_TEXTURE_FLAG) {
+        uint32_t sid = texHandle & ~GL_SURFACE_TEXTURE_FLAG;
+        if (sid >= gl->surfaceCount || gl->surfaceTexture[sid] == 0) return false;
+        if (outTpag) *outTpag = nullptr;
+        *outW = gl->surfaceWidth[sid];
+        *outH = gl->surfaceHeight[sid];
+        return true;
+    }
     DataWin* dw = gl->base.dataWin;
     int32_t tpagIndex = (int32_t) texHandle - 1;
     if (0 > tpagIndex || dw->tpag.count <= (uint32_t) tpagIndex) return false;
@@ -1606,6 +1614,13 @@ static uint32_t glSpriteGetTexture(Renderer* renderer, int32_t tpagIndex) {
     return (uint32_t) (tpagIndex + 1);
 }
 
+static uint32_t glSurfaceGetTexture(Renderer* renderer, int32_t surfaceID) {
+    GLLegacyRenderer* gl = (GLLegacyRenderer*) renderer;
+    if (surfaceID < 0 || (uint32_t) surfaceID >= gl->surfaceCount) return 0;
+    if (gl->surfaceTexture[surfaceID] == 0) return 0;
+    return GL_SURFACE_TEXTURE_FLAG | (uint32_t) surfaceID;
+}
+
 static float glTextureGetTexelWidth(Renderer* renderer, uint32_t texHandle) {
     GLLegacyRenderer* gl = (GLLegacyRenderer*) renderer;
     TexturePageItem* tpag;
@@ -1627,6 +1642,11 @@ static bool glTextureGetUVs(Renderer* renderer, uint32_t texHandle, float* outUV
     TexturePageItem* tpag;
     int32_t w = 0, h = 0;
     if (!glLegacyResolveTextureHandle(gl, texHandle, &tpag, &w, &h) || 0 >= w || 0 >= h) return false;
+    // Surface handles cover the whole texture (no tpag sub-region).
+    if (tpag == nullptr) {
+        outUVs[0] = 0.0f; outUVs[1] = 0.0f; outUVs[2] = 1.0f; outUVs[3] = 1.0f;
+        return true;
+    }
     float divW = 1.0f / (float) w;
     float divH = 1.0f / (float) h;
     outUVs[0] = (float) tpag->sourceX * divW;                       // left
@@ -1701,6 +1721,7 @@ Renderer* GLLegacyRenderer_create(void) {
     glVtable.surfaceCopy = glLegacySurfaceCopy;
     glVtable.surfaceGetPixels = glLegacySurfaceGetPixels;
     glVtable.spriteGetTexture = glSpriteGetTexture;
+    glVtable.surfaceGetTexture = glSurfaceGetTexture;
     glVtable.textureGetTexelWidth = glTextureGetTexelWidth;
     glVtable.textureGetTexelHeight = glTextureGetTexelHeight;
     glVtable.textureGetUVs = glTextureGetUVs;

@@ -1822,6 +1822,7 @@ static void validateRendererVtable(Renderer* renderer) {
     requireNotNullFunction(surfaceCopy);
     requireNotNullFunction(surfaceGetPixels);
     requireNotNullFunction(spriteGetTexture);
+    requireNotNullFunction(surfaceGetTexture);
     requireNotNullFunction(textureGetTexelWidth);
     requireNotNullFunction(textureGetTexelHeight);
     requireNotNullFunction(textureGetUVs);
