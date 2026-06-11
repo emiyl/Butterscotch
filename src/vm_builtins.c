@@ -3550,9 +3550,9 @@ static RValue variableInstanceGetOn(VMContext* ctx, Instance* target, const char
         snprintf(additional, sizeof(additional), " (%s, builtin)", originBuiltin);
         VM_checkIfVariableShouldBeTracedAndLog(ctx, variableTraceObjectName(ctx, target), "self", name, val, false, -1, target->instanceId, additional);
 #endif
-        // Duplicate string so caller-owned args cleanup does not affect it
-        if (val.type == RVALUE_STRING && val.string != nullptr && !val.ownsReference) {
-            return RValue_makeOwnedString(safeStrdup(val.string));
+        // Duplicate RValue so caller-owned args cleanup does not affect it
+        if (!val.ownsReference) {
+            return RValue_makeIndependent(val);
         }
         return val;
     }
@@ -3564,10 +3564,7 @@ static RValue variableInstanceGetOn(VMContext* ctx, Instance* target, const char
     snprintf(additional, sizeof(additional), " (%s)", originBuiltin);
     VM_checkIfVariableShouldBeTracedAndLog(ctx, variableTraceObjectName(ctx, target), "self", name, val, false, -1, target->instanceId, additional);
 #endif
-    if (val.type == RVALUE_STRING && val.string != nullptr) {
-        return RValue_makeOwnedString(safeStrdup(val.string));
-    }
-    return val;
+    return RValue_makeIndependent(val);
 }
 
 static inline bool variableScopedMatches(Instance* inst, bool structOnly) {
