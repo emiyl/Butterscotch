@@ -243,21 +243,6 @@ static uint32_t resolveFuncOperand(const uint8_t* extraData) {
 // Forward declarations
 static Instance* findInstanceByTarget(VMContext* ctx, int32_t target);
 
-// Read array[index]. Returns RVALUE_UNDEFINED when slot is not an array or when index is out of bounds.
-// The returned RValue is a weak view, callers that stash it must strengthen (incRef, strdup).
-static RValue VM_arrayReadAt(RValue* slot, int32_t index) {
-    if (slot == nullptr || slot->type != RVALUE_ARRAY || slot->array == nullptr) {
-        return RValue_makeUndefined();
-    }
-    RValue* cell = GMLArray_slot(slot->array, index);
-    if (cell == nullptr) {
-        return RValue_makeUndefined();
-    }
-    RValue result = *cell;
-    result.ownsReference = false;
-    return result;
-}
-
 // CoW fork for array writes (BC17+): when the slot's array is owned by a different scope, replace it with a uniquely-owned clone stamped with the current owner,
 // so the upcoming store (Pop for one dimensional arrays, or the chain's eventual BREAK_POPAF for multi-dimensional arrays) can write in place.
 // Essentially "If we don't own this array, copy it and decrease the reference count of the original array".
@@ -335,7 +320,7 @@ RValue VM_structGet(VMContext* ctx, Instance* structInst, const char* name, int3
     if (nameSlot >= 0) {
         RValue* slot = IntRValueHashMap_findSlot(&structInst->selfVars, ctx->selfVarNameMap[nameSlot].value);
         if (slot != nullptr) {
-            if (arrayIndex >= 0) return VM_arrayReadAt(slot, arrayIndex);
+            if (arrayIndex >= 0) return GMLArray_getOnArrayRef(slot, arrayIndex);
             RValue result = *slot;
             result.ownsReference = false;
             return result;
@@ -592,7 +577,7 @@ static bool tryReadStaticFallback(VMContext* ctx, Instance* inst, int32_t varID,
         RValue* sslot = IntRValueHashMap_findSlot(&staticStruct->selfVars, varID);
         if (sslot != nullptr) {
             if (access->isArray) {
-                *out = VM_arrayReadAt(sslot, access->arrayIndex);
+                *out = GMLArray_getOnArrayRef(sslot, access->arrayIndex);
             } else {
                 *out = *sslot;
                 out->ownsReference = false;
@@ -637,7 +622,7 @@ static bool tryReadInstanceVarOrStatic(VMContext* ctx, Instance* instance, int32
     RValue* slot = IntRValueHashMap_findSlot(&instance->selfVars, varID);
     if (slot != nullptr) {
         if (access->isArray) {
-            *out = VM_arrayReadAt(slot, access->arrayIndex);
+            *out = GMLArray_getOnArrayRef(slot, access->arrayIndex);
             return true;
         }
         RValue val = *slot;
@@ -725,7 +710,7 @@ static RValue resolveVariableRead(VMContext* ctx, int32_t instanceType, uint32_t
                 // }
                 // Without this, the caller gets the whole array back
                 if (access.isArray && result.type == RVALUE_ARRAY && result.array != nullptr) {
-                    result = VM_arrayReadAt(&result, access.arrayIndex);
+                    result = GMLArray_getOnArrayRef(&result, access.arrayIndex);
                 }
             } else {
                 result = RValue_makeUndefined();
@@ -816,7 +801,7 @@ static RValue resolveVariableRead(VMContext* ctx, int32_t instanceType, uint32_t
     }
 
     // Resolve the variable's scalar slot pointer for the target scope. Array-valued vars live inline as RVALUE_ARRAY in the same slot.
-    // VM_arrayReadAt handles the array indirection when access.isArray, VM_arrayWriteAt handles CoW forking when writing.
+    // GMLArray_getOnArrayRef handles the array indirection when access.isArray, VM_arrayWriteAt handles CoW forking when writing.
     RValue* slot = nullptr;
     switch (instanceType) {
         case INSTANCE_LOCAL: {
@@ -840,7 +825,7 @@ static RValue resolveVariableRead(VMContext* ctx, int32_t instanceType, uint32_t
                 return RValue_makeReal(0.0);
             }
             slot = IntRValueHashMap_findSlot(&inst->selfVars, varDef->varID);
-            // sparse storage: nonexistent entry -> treat as undefined scalar (array reads fall through to VM_arrayReadAt returning undefined)
+            // sparse storage: nonexistent entry -> treat as undefined scalar (array reads fall through to GMLArray_getOnArrayRef returning undefined)
             if (slot == nullptr) {
 #if IS_WAD17_OR_HIGHER_ENABLED
                 // Static variables: a struct field declared "static" lives on the constructor's shared static struct, not the instance.
@@ -857,7 +842,7 @@ static RValue resolveVariableRead(VMContext* ctx, int32_t instanceType, uint32_t
 
     // Array access: read array[index] from the slot.
     if (access.isArray) {
-        RValue result = VM_arrayReadAt(slot, access.arrayIndex);
+        RValue result = GMLArray_getOnArrayRef(slot, access.arrayIndex);
 #ifdef ENABLE_VM_TRACING
         const char* scopeName =
             instanceType == INSTANCE_LOCAL ? "local" :
