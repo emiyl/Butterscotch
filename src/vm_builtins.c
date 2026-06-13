@@ -14159,6 +14159,10 @@ static RValue fontAddSpriteImpl(VMContext* ctx, int32_t spriteIndex, uint16_t* c
     uint32_t glyphCount = charCount;
     if (glyphCount > sprite->textureCount) glyphCount = sprite->textureCount;
 
+    // GM 2023.2 changed sprite-font glyph placement to subtract the source sprite's origin.
+    // (See GameMaker-HTML5's commit a7c5b909209d5a28602fedfe2031965386a99921)
+    bool spriteFontSubtractsOrigin = DataWin_isVersionAtLeast(dw, 2023, 2, 0, 0);
+
     // Compute emSize (max bounding height across all frames) and biggestShift
     uint32_t maxHeight = 0;
     int32_t biggestShift = 0;
@@ -14207,8 +14211,9 @@ static RValue fontAddSpriteImpl(VMContext* ctx, int32_t spriteIndex, uint16_t* c
         int32_t advanceWidth = proportional ? (int32_t) tpag->sourceWidth : (int32_t) tpag->boundingWidth;
         glyph->shift = (int16_t) (advanceWidth + sep);
 
-        // Horizontal offset: for proportional fonts, no offset; for non-proportional, use target offset minus origin
-        glyph->offset = proportional ? 0 : (int16_t) ((int32_t) tpag->targetX - sprite->originX);
+        // Horizontal offset: proportional fonts have none. Non-proportional uses the cell offset targetX, minus the sprite origin only on GM 2023.2+ (pre-2023.2 the origin cancels).
+        int32_t xOff = (int32_t) tpag->targetX - (spriteFontSubtractsOrigin ? sprite->originX : 0);
+        glyph->offset = proportional ? 0 : (int16_t) xOff;
     }
 
     // Add synthetic space glyph if space is not in the string map
@@ -14246,7 +14251,9 @@ static RValue fontAddSpriteImpl(VMContext* ctx, int32_t spriteIndex, uint16_t* c
     font->ascenderOffset = 0;
     font->glyphCount = totalGlyphs;
     font->glyphs = glyphs;
-    font->maxGlyphHeight = maxHeight; // match what HTML5 runner uses for line stride
+    // Line height = full frame bounding height (used for line stride and fa_middle/fa_bottom
+    // valign offsets), matching the native runner's sprite-font TextHeight (= sprite height).
+    font->maxGlyphHeight = maxHeight;
     font->isSpriteFont = true;
     font->spriteIndex = spriteIndex;
     Font_buildGlyphLUT(font);
@@ -14263,6 +14270,45 @@ static RValue builtin_font_get_name(VMContext* ctx, RValue* args, int32_t argCou
     int32_t fontIndex = RValue_toInt32(args[0]);
     if (0 > fontIndex || (uint32_t) fontIndex >= ctx->dataWin->font.count) return RValue_makeUndefined();
     return RValue_makeString(ctx->dataWin->font.fonts[fontIndex].name);
+}
+
+// font_get_info(font): returns a struct with the font information.
+static RValue builtin_font_get_info(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (1 > argCount) return RValue_makeUndefined();
+    int32_t fontIndex = RValue_toInt32(args[0]);
+    if (0 > fontIndex || (uint32_t) fontIndex >= ctx->dataWin->font.count) return RValue_makeUndefined();
+    Font* font = &ctx->dataWin->font.fonts[fontIndex];
+
+    Instance* ret = Runner_createStruct(ctx->runner);
+    VM_structSetAndFreeVal(ctx, ret, "spriteIndex", RValue_makeInt32(font->isSpriteFont ? font->spriteIndex : -1), -1);
+    VM_structSetAndFreeVal(ctx, ret, "size", RValue_makeInt32((int32_t) font->emSize), -1);
+    VM_structSetAndFreeVal(ctx, ret, "ascender", RValue_makeInt32((int32_t) font->ascender), -1);
+    VM_structSetAndFreeVal(ctx, ret, "ascenderOffset", RValue_makeInt32(font->ascenderOffset), -1);
+    VM_structSetAndFreeVal(ctx, ret, "sdfSpread", RValue_makeInt32((int32_t) font->sdfSpread), -1);
+    VM_structSetAndFreeVal(ctx, ret, "sdfEnabled", RValue_makeBool(font->sdfSpread != 0), -1);
+    VM_structSetAndFreeVal(ctx, ret, "freetype", RValue_makeBool(false), -1);
+    VM_structSetAndFreeVal(ctx, ret, "name", RValue_makeString(font->name ? font->name : ""), -1);
+    VM_structSetAndFreeVal(ctx, ret, "bold", RValue_makeBool(font->bold), -1);
+    VM_structSetAndFreeVal(ctx, ret, "italic", RValue_makeBool(font->italic), -1);
+    VM_structSetAndFreeVal(ctx, ret, "texture", RValue_makeInt32(-1), -1);
+    // glyphs: char -> { char: glyphIndexInSprite }, matching GameMaker-HTML5's SpriteMapDictionary.
+    Instance* glyphs = Runner_createStruct(ctx->runner);
+    if (font->isSpriteFont) {
+        repeat(font->glyphCount, glyphIndex) {
+            uint16_t cp = font->glyphs[glyphIndex].character;
+            char key[8];
+            int32_t klen = TextUtils_utf8EncodeCodepoint(cp, key);
+            key[klen] = '\0';
+            Instance* glyphEntry = Runner_createStruct(ctx->runner);
+            VM_structSetAndFreeVal(ctx, glyphEntry, "char", RValue_makeInt32((int32_t) glyphIndex), -1);
+            RValue glyphEntryRValue = RValue_makeStructAndIncRef(glyphEntry);
+            VM_structSetAndFreeVal(ctx, glyphs, key, glyphEntryRValue, -1);
+        }
+    }
+    RValue glyphsVal = RValue_makeStructAndIncRef(glyphs);
+    VM_structSetAndFreeVal(ctx, ret, "glyphs", glyphsVal, -1);
+
+    return RValue_makeStructAndIncRef(ret);
 }
 
 // font_add_sprite_ext(sprite, string_map, prop, sep)
@@ -15607,6 +15653,7 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "font_add_sprite", builtin_font_add_sprite);
     VM_registerBuiltin(ctx, "font_add_sprite_ext", builtin_font_add_sprite_ext);
     VM_registerBuiltin(ctx, "font_get_name", builtin_font_get_name);
+    VM_registerBuiltin(ctx, "font_get_info", builtin_font_get_info);
     VM_registerBuiltin(ctx, "object_exists", builtin_object_exists);
     VM_registerBuiltin(ctx, "object_get_depth", builtin_object_get_depth);
     VM_registerBuiltin(ctx, "object_get_name", builtin_object_get_name);

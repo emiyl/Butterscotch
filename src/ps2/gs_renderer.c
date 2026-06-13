@@ -1862,8 +1862,11 @@ static bool gsResolveGlyph(GsRenderer* gs, DataWin* dw, GsFontState* state, Font
         *outU1 = *outU0 + (float) glyph->sourceWidth * gRatioX;
         *outV1 = *outV0 + (float) glyph->sourceHeight * gRatioY;
 
+        // Sprite-font glyphs sit at the cell offset; GM 2023.2+ subtracts the sprite origin, pre-2023.2
+        // it cancels. See glResolveGlyph in src/gl/gl_renderer.c for the full rationale.
         *outLocalX0 = cursorX + (float) glyph->offset;
-        *outLocalY0 = cursorY + (float) ((int32_t) glyphTpag->targetY - sprite->originY);
+        *outLocalY0 = cursorY + (float) (int32_t) glyphTpag->targetY;
+        if (DataWin_isVersionAtLeast(dw, 2023, 2, 0, 0)) *outLocalY0 -= (float) sprite->originY;
     } else {
         *outTex = state->tex;
 
