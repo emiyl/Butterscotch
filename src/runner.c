@@ -2140,6 +2140,13 @@ Runner* Runner_create(DataWin* dataWin, VMContext* vm, Renderer* renderer, FileS
         shput(runner->assetsByName, dataWin->room.rooms[i].name, i);
     }
 
+    repeat(shlen(vm->builtinMap), i) {
+        bool isRegistered = shgeti(vm->codeIndexByName, vm->builtinMap[i].key) != -1;
+        if (isRegistered) {
+            fprintf(stderr, "Builtin function %s has the same name as a GML script! The script may be a compatibility script provided by GM:S 2+, and the game may have issues due to the builtin overriding it!\n", vm->builtinMap[i].key);
+        }
+    }
+
     Runner_reset(runner);
 
     populateObjectsWithAnyEventOfType(runner);
