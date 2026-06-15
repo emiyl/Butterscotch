@@ -2385,9 +2385,6 @@ void Runner_initFirstRoom(Runner* runner) {
 
     int32_t firstRoomIndex = dataWin->gen8.roomOrder[0];
 
-    // Initialize the first room
-    initRoom(runner, firstRoomIndex);
-
     // Run global init scripts with the global scope instance as "self"
     // In GMS 2.3+ (BC17), GLOB scripts store function declarations on "self" via Pop.v.v
     runner->vmContext->currentInstance = runner->globalScopeInstance;
@@ -2422,7 +2419,10 @@ void Runner_initFirstRoom(Runner* runner) {
         }
     }
     runner->vmContext->currentInstance = nullptr;
-    
+
+    // Initialize the first room
+    initRoom(runner, firstRoomIndex);
+
     // Fire Game Start for all instances
     Runner_executeEventForAll(runner, EVENT_OTHER, OTHER_GAME_START);
     runner->gameStartFired = true;
