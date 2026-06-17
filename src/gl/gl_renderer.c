@@ -2032,7 +2032,7 @@ static void glDrawSurface(Renderer* renderer, int32_t surfaceID, int32_t srcLeft
     float u0 = (float) srcLeft / (float) texW;
     float v0 = (float) srcTop / (float) texH;
     float u1 = (float) (srcLeft + srcWidth) / (float) texW;
-    float v1 = (float) (srcTop + texH) / (float) texH;
+    float v1 = (float) (srcTop + srcHeight) / (float) texH;
 
     float localX1 = (float) srcWidth;
     float localY1 = (float) srcHeight;
