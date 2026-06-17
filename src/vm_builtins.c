@@ -13020,9 +13020,8 @@ static RValue builtin_array_create(VMContext* ctx, RValue* args, int32_t argCoun
 // @@This@@ - GMS2 internal function returning the current instance's ID.
 // Emitted by the GMS2 compiler for expressions like `self` when used as a value.
 static RValue builtin_This(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
-    Instance* inst = ctx->currentInstance;
-    if (inst == nullptr) return RValue_makeInt32(INSTANCE_SELF);
-    return RValue_makeInt32((int32_t) inst->instanceId);
+    Instance* instance = requireNotNullMessage(ctx->currentInstance, "Called @@This@@ while there isn't a current instance on the context!");
+    return RValue_makeInt32((int32_t) instance->instanceId);
 }
 
 // @@Global@@ - GMS2 internal function returning the "global" instance's ID.
