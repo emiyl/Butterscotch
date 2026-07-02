@@ -973,6 +973,7 @@ int main(int argc, char* argv[]) {
     bool platformInitialized = false;
     int32_t inputFrameCount = 0;
 
+    int glad_ret;
     while (true) {
         fprintf(stderr, "Loading %s...\n", args.dataWinPath);
 
@@ -1273,7 +1274,6 @@ int main(int argc, char* argv[]) {
         int32_t windowW, windowH;
         resolveWindowSize(&args, gen8->defaultWindowWidth, gen8->defaultWindowHeight, &windowW, &windowH);
 
-        int glad_ret;
         if (!platformInitialized) {
             if (!platformInit(windowW, windowH, windowTitle, args.headless)) {
                 DataWin_free(dataWin);
