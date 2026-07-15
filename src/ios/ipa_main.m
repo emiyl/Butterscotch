@@ -2,6 +2,7 @@
 #import <GLKit/GLKit.h>
 #import <QuartzCore/CADisplayLink.h>
 #import <GameController/GameController.h>
+#import <AVFoundation/AVFoundation.h>
 #import <OpenGLES/ES3/gl.h>
 
 #include "ios/butterscotch_ios.h"
@@ -17,11 +18,6 @@ static const int32_t BS_KEY_ACTION_A = 'Z';
 static const int32_t BS_KEY_ACTION_B = 'X';
 static const int32_t BS_KEY_ACTION_X = 'C';
 static const int32_t BS_KEY_ACTION_Y = 'V';
-
-static const int32_t BS_KEY_DIR_LEFT_ALT = 'A';
-static const int32_t BS_KEY_DIR_RIGHT_ALT = 'D';
-static const int32_t BS_KEY_DIR_UP_ALT = 'W';
-static const int32_t BS_KEY_DIR_DOWN_ALT = 'S';
 
 static NSString* const BS_SETTING_SPEED_MULTIPLIER = @"bs.settings.speedMultiplier";
 static NSString* const BS_SETTING_NINTENDO_SWAP = @"bs.settings.nintendoSwap";
@@ -65,6 +61,7 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 }
 
 @class ButterscotchGameViewController;
+static __unsafe_unretained ButterscotchGameViewController* gActiveGameController = nil;
 
 @protocol ButterscotchGameViewControllerDelegate <NSObject>
 - (void)gameViewControllerDidRequestReturnToLibrary:(ButterscotchGameViewController*)controller;
@@ -96,9 +93,16 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 @property(assign, nonatomic) float fixedStepDeltaSeconds;
 @property(assign, nonatomic) float accumulatedDisplaySeconds;
 @property(assign, nonatomic) float pendingFrameDeltaSeconds;
+@property(assign, nonatomic) NSInteger pendingSimulationSteps;
 @property(assign, nonatomic) CFTimeInterval lastDisplayLinkTimestamp;
 @property(assign, nonatomic) BOOL preferNintendoFaceSwap;
 @property(strong, nonatomic) NSTimer* menuAutoHideTimer;
+@property(assign, nonatomic) BOOL sessionPaused;
+@property(strong, nonatomic) AVPlayer* videoPlayer;
+@property(strong, nonatomic) AVPlayerLayer* videoLayer;
+@property(strong, nonatomic) id videoEndObserver;
+@property(assign, nonatomic) BOOL videoLoopEnabled;
+@property(assign, nonatomic) float videoVolume;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewLeadingConstraint;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewTrailingConstraint;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewTopConstraint;
@@ -107,6 +111,8 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 
 - (instancetype)initWithLaunchInfo:(NSDictionary<NSString*, NSString*>*)launchInfo;
 - (void)shutdownRunnerSession;
+- (void)setSessionPaused:(BOOL)paused;
+- (void)clearAllVirtualKeys;
 - (void)appendDebugLine:(NSString*)line;
 - (void)setupVirtualControls;
 - (void)rebuildOptionsMenu;
@@ -124,6 +130,10 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 - (void)pollRuntimeLog;
 - (void)attemptStartRunner;
 - (void)refreshStatus;
+- (BOOL)videoOpenAbsolutePath:(NSString*)absolutePath;
+- (void)videoSetLoopEnabled:(BOOL)enabled;
+- (void)videoSetVolume:(float)volume;
+- (int32_t)videoGetFormat;
 @end
 
 @implementation ButterscotchGameViewController
@@ -159,9 +169,13 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     self.fixedStepDeltaSeconds = 1.0f / 60.0f;
     self.accumulatedDisplaySeconds = 0.0f;
     self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+    self.pendingSimulationSteps = 1;
     self.lastDisplayLinkTimestamp = 0.0;
     self.logVisible = NO;
     self.controlsVisible = YES;
+    self.sessionPaused = YES;
+    self.videoLoopEnabled = NO;
+    self.videoVolume = 1.0f;
     self.preferNintendoFaceSwap = BSLoadNintendoSwap();
     self.debugLines = [NSMutableArray array];
 
@@ -236,6 +250,18 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     [self.menuAutoHideTimer invalidate];
     self.menuAutoHideTimer = nil;
 
+    if (self.videoEndObserver != nil) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self.videoEndObserver];
+        self.videoEndObserver = nil;
+    }
+    [self.videoPlayer pause];
+    [self.videoLayer removeFromSuperlayer];
+    self.videoLayer = nil;
+    self.videoPlayer = nil;
+    if (gActiveGameController == self) {
+        gActiveGameController = nil;
+    }
+
     [self shutdownRunnerSession];
 
     if ([EAGLContext currentContext] == self.glContext) {
@@ -247,6 +273,7 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 }
 
 - (void)shutdownRunnerSession {
+    [self setSessionPaused:YES];
     if (!self.runnerStarted) {
         return;
     }
@@ -255,9 +282,44 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     self.runnerStarted = NO;
     self.accumulatedDisplaySeconds = 0.0f;
     self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+    self.pendingSimulationSteps = 1;
     self.lastDisplayLinkTimestamp = 0.0;
+    [self clearAllVirtualKeys];
+}
+
+- (void)setSessionPaused:(BOOL)paused {
+    if (_sessionPaused == paused) {
+        return;
+    }
+    _sessionPaused = paused;
+    self.paused = paused;
+    if (self.displayLink != nil) {
+        self.displayLink.paused = paused;
+    }
+
+    if (paused) {
+        self.lastDisplayLinkTimestamp = 0.0;
+        self.accumulatedDisplaySeconds = 0.0f;
+        [self clearAllVirtualKeys];
+        if (self.mouseDown) {
+            self.mouseDown = NO;
+            ButterscotchIOS_setMouseButtonState(0, false);
+        }
+        [self.videoPlayer pause];
+    } else {
+        self.lastDisplayLinkTimestamp = 0.0;
+        if (self.videoPlayer != nil) {
+            [self.videoPlayer play];
+        }
+    }
+}
+
+- (void)clearAllVirtualKeys {
     for (int32_t i = 0; i < GML_KEY_COUNT; i++) {
-        _keySourceMask[i] = 0;
+        if (_keySourceMask[i] != 0) {
+            ButterscotchIOS_onKeyUp(i);
+            _keySourceMask[i] = 0;
+        }
     }
 }
 
@@ -394,16 +456,12 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 - (void)setDirectionalKeysForArrow:(int32_t)arrow source:(uint8_t)source down:(BOOL)down {
     if (arrow == VK_LEFT) {
         [self setVirtualKey:VK_LEFT source:source down:down];
-        [self setVirtualKey:BS_KEY_DIR_LEFT_ALT source:source down:down];
     } else if (arrow == VK_RIGHT) {
         [self setVirtualKey:VK_RIGHT source:source down:down];
-        [self setVirtualKey:BS_KEY_DIR_RIGHT_ALT source:source down:down];
     } else if (arrow == VK_UP) {
         [self setVirtualKey:VK_UP source:source down:down];
-        [self setVirtualKey:BS_KEY_DIR_UP_ALT source:source down:down];
     } else if (arrow == VK_DOWN) {
         [self setVirtualKey:VK_DOWN source:source down:down];
-        [self setVirtualKey:BS_KEY_DIR_DOWN_ALT source:source down:down];
     }
 }
 
@@ -711,6 +769,7 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     self.displayLinkTickCounter = 0;
     self.accumulatedDisplaySeconds = 0.0f;
     self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+    self.pendingSimulationSteps = 1;
     self.lastDisplayLinkTimestamp = 0.0;
     self.statusLabel.hidden = YES;
 
@@ -725,6 +784,8 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     if (self.preferredFramesPerSecond > 0) {
         self.displayLink.preferredFramesPerSecond = self.preferredFramesPerSecond;
     }
+
+    [self setSessionPaused:NO];
 }
 
 - (void)refreshStatus {
@@ -734,7 +795,7 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
         @"Butterscotch iOS\n\n"
          "%@ data.win missing.\n\n"
          "Expected path:\n%@\n\n"
-         "Open Files > On My iPhone/iPad > Butterscotch and copy your files, then tap Refresh.",
+         "Open Files > On My iPhone/iPad > Butterscotch and copy your files.",
         self.launchTitle,
         required];
 }
@@ -748,7 +809,7 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 }
 
 - (void)onDisplayLinkTick:(CADisplayLink*)link {
-    if (self.gameView == nil) {
+    if (self.gameView == nil || self.sessionPaused) {
         return;
     }
 
@@ -785,7 +846,10 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
         }
 
         NSInteger speedMultiplier = BSLoadSpeedMultiplier();
-        self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds * (float) speedMultiplier;
+        if (speedMultiplier < 1) speedMultiplier = 1;
+        if (speedMultiplier > 4) speedMultiplier = 4;
+        self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+        self.pendingSimulationSteps = speedMultiplier;
         self.accumulatedDisplaySeconds -= self.fixedStepDeltaSeconds;
         if (self.accumulatedDisplaySeconds > self.fixedStepDeltaSeconds * 4.0f) {
             self.accumulatedDisplaySeconds = self.fixedStepDeltaSeconds;
@@ -807,9 +871,11 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     self.hostFrameCounter += 1;
 
     float dt = self.pendingFrameDeltaSeconds;
-    if (dt <= 0.0f) {
-        dt = self.fixedStepDeltaSeconds;
-    }
+    if (dt <= 0.0f) dt = self.fixedStepDeltaSeconds;
+
+    NSInteger steps = self.pendingSimulationSteps;
+    if (steps < 1) steps = 1;
+    if (steps > 4) steps = 4;
 
     [EAGLContext setCurrentContext:self.glContext];
     [view bindDrawable];
@@ -818,8 +884,14 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &hostFramebuffer);
     ButterscotchIOS_setHostFramebuffer((uint32_t) hostFramebuffer);
 
-    ButterscotchIOS_beginFrame();
-    int32_t result = ButterscotchIOS_stepAndDraw((int32_t) (view.drawableWidth), (int32_t) (view.drawableHeight), dt);
+    int32_t result = BS_IOS_CONTINUE;
+    for (NSInteger i = 0; i < steps; i++) {
+        ButterscotchIOS_beginFrame();
+        result = ButterscotchIOS_stepAndDraw((int32_t) (view.drawableWidth), (int32_t) (view.drawableHeight), dt);
+        if (result == BS_IOS_SHOULD_EXIT) {
+            break;
+        }
+    }
     [self pollRuntimeLog];
 
     GLenum glErr = glGetError();
@@ -867,6 +939,9 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     [self updateGameViewLayoutForCurrentOrientation];
+    if (self.videoLayer != nil && self.gameView != nil) {
+        self.videoLayer.frame = self.gameView.bounds;
+    }
 }
 
 - (void)updateGameViewLayoutForCurrentOrientation {
@@ -919,7 +994,168 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     ButterscotchIOS_setMouseButtonState(0, false);
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    gActiveGameController = self;
+    [self setSessionPaused:NO];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self setSessionPaused:YES];
+}
+
+- (BOOL)videoOpenAbsolutePath:(NSString*)absolutePath {
+    if (absolutePath == nil || absolutePath.length == 0) {
+        return NO;
+    }
+    if (![[NSFileManager defaultManager] fileExistsAtPath:absolutePath]) {
+        [self appendDebugLine:[NSString stringWithFormat:@"[video] missing file: %@", absolutePath]];
+        return NO;
+    }
+
+    if (self.videoEndObserver != nil) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self.videoEndObserver];
+        self.videoEndObserver = nil;
+    }
+    [self.videoPlayer pause];
+    [self.videoLayer removeFromSuperlayer];
+    self.videoLayer = nil;
+
+    NSURL* url = [NSURL fileURLWithPath:absolutePath];
+    AVPlayerItem* item = [AVPlayerItem playerItemWithURL:url];
+    self.videoPlayer = [AVPlayer playerWithPlayerItem:item];
+    self.videoPlayer.volume = self.videoVolume;
+
+    self.videoLayer = [AVPlayerLayer playerLayerWithPlayer:self.videoPlayer];
+    self.videoLayer.videoGravity = AVLayerVideoGravityResizeAspect;
+    self.videoLayer.frame = self.gameView.bounds;
+    [self.gameView.layer addSublayer:self.videoLayer];
+
+    __unsafe_unretained typeof(self) weakSelf = self;
+    self.videoEndObserver = [[NSNotificationCenter defaultCenter]
+        addObserverForName:AVPlayerItemDidPlayToEndTimeNotification
+                    object:item
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification* notification) {
+                    (void) notification;
+                    if (weakSelf == nil || weakSelf.videoPlayer == nil) {
+                        return;
+                    }
+                    if (weakSelf.videoLoopEnabled) {
+                        CMTime zeroTime = (CMTime){ .value = 0, .timescale = 1, .flags = kCMTimeFlags_Valid, .epoch = 0 };
+                        [weakSelf.videoPlayer seekToTime:zeroTime toleranceBefore:zeroTime toleranceAfter:zeroTime completionHandler:^(BOOL finished) {
+                            if (finished && !weakSelf.sessionPaused) {
+                                [weakSelf.videoPlayer play];
+                            }
+                        }];
+                    } else {
+                        [weakSelf.videoLayer removeFromSuperlayer];
+                        weakSelf.videoLayer = nil;
+                    }
+                }];
+
+    if (!self.sessionPaused) {
+        [self.videoPlayer play];
+    }
+    [self appendDebugLine:[NSString stringWithFormat:@"[video] playing %@", absolutePath.lastPathComponent]];
+    return YES;
+}
+
+- (void)videoSetLoopEnabled:(BOOL)enabled {
+    self.videoLoopEnabled = enabled;
+}
+
+- (void)videoSetVolume:(float)volume {
+    if (volume < 0.0f) volume = 0.0f;
+    if (volume > 1.0f) volume = 1.0f;
+    self.videoVolume = volume;
+    if (self.videoPlayer != nil) {
+        self.videoPlayer.volume = volume;
+    }
+}
+
+- (int32_t)videoGetFormat {
+    // Keep GMS happy; 0 is widely accepted as default video format id.
+    return 0;
+}
+
 @end
+
+bool ButterscotchIOS_videoOpen(const char* absolutePath) {
+    if (absolutePath == NULL || absolutePath[0] == '\0') {
+        return false;
+    }
+
+    __block BOOL opened = NO;
+    NSString* path = [NSString stringWithUTF8String:absolutePath];
+    if (path == nil || path.length == 0) {
+        return false;
+    }
+
+    void (^openBlock)(void) = ^{
+        ButterscotchGameViewController* controller = gActiveGameController;
+        if (controller != nil) {
+            opened = [controller videoOpenAbsolutePath:path];
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        openBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), openBlock);
+    }
+
+    return opened;
+}
+
+void ButterscotchIOS_videoEnableLoop(bool enabled) {
+    void (^loopBlock)(void) = ^{
+        ButterscotchGameViewController* controller = gActiveGameController;
+        if (controller != nil) {
+            [controller videoSetLoopEnabled:enabled ? YES : NO];
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        loopBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), loopBlock);
+    }
+}
+
+void ButterscotchIOS_videoSetVolume(float volume) {
+    void (^volumeBlock)(void) = ^{
+        ButterscotchGameViewController* controller = gActiveGameController;
+        if (controller != nil) {
+            [controller videoSetVolume:volume];
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        volumeBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), volumeBlock);
+    }
+}
+
+int32_t ButterscotchIOS_videoGetFormat(void) {
+    __block int32_t format = 0;
+    void (^formatBlock)(void) = ^{
+        ButterscotchGameViewController* controller = gActiveGameController;
+        if (controller != nil) {
+            format = [controller videoGetFormat];
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        formatBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), formatBlock);
+    }
+
+    return format;
+}
 
 @class ButterscotchAppCoordinator;
 
@@ -1092,7 +1328,9 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     if (self.rootTabBarController.presentedViewController == self.activeGameController) {
         return;
     }
-    [self.rootTabBarController presentViewController:self.activeGameController animated:YES completion:nil];
+    [self.rootTabBarController presentViewController:self.activeGameController animated:YES completion:^{
+        [self.activeGameController setSessionPaused:NO];
+    }];
 }
 
 - (void)startLaunchInfo:(NSDictionary<NSString*, NSString*>*)launchInfo {
@@ -1137,6 +1375,7 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 }
 
 - (void)gameViewControllerDidRequestReturnToLibrary:(ButterscotchGameViewController*)controller {
+    [controller setSessionPaused:YES];
     if (self.rootTabBarController.presentedViewController == controller) {
         [controller dismissViewControllerAnimated:YES completion:nil];
     }

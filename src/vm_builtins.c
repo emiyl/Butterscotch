@@ -31,6 +31,9 @@
 #include "sha1.h"
 #include "base64.h"
 #include "gettime.h"
+#if defined(PLATFORM_IOS)
+#include "ios/butterscotch_ios.h"
+#endif
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -7774,10 +7777,80 @@ static RValue builtin_joystick_axes(VMContext* ctx, RValue* args, MAYBE_UNUSED i
 STUB_RETURN_ZERO(window_get_fullscreen)
 STUB_RETURN_UNDEFINED(window_set_fullscreen)
 STUB_RETURN_UNDEFINED(window_enable_borderless_fullscreen)
-STUB_RETURN_TRUE(video_open)
-STUB_RETURN_UNDEFINED(video_enable_loop)
-STUB_RETURN_UNDEFINED(video_set_volume)
-STUB_RETURN_ZERO(video_get_format)
+
+static RValue builtin_video_open(VMContext* ctx, RValue* args, int32_t argCount) {
+#if defined(PLATFORM_IOS)
+    if (1 > argCount) return RValue_makeBool(false);
+
+    Runner* runner = ctx->runner;
+    if (runner == nullptr || runner->fileSystem == nullptr) return RValue_makeBool(false);
+
+    char* pathArg = RValue_toString(args[0]);
+    if (pathArg == nullptr || pathArg[0] == '\0') {
+        free(pathArg);
+        return RValue_makeBool(false);
+    }
+
+    char* absolutePath = nullptr;
+    if (pathArg[0] == '/') {
+        absolutePath = safeStrdup(pathArg);
+    } else {
+        absolutePath = runner->fileSystem->vtable->resolvePath(runner->fileSystem, pathArg);
+    }
+
+    bool opened = false;
+    if (absolutePath != nullptr) {
+        opened = ButterscotchIOS_videoOpen(absolutePath);
+    }
+
+    free(absolutePath);
+    free(pathArg);
+    return RValue_makeBool(opened);
+#else
+    logStubbedFunction(ctx, "video_open");
+    return RValue_makeBool(true);
+#endif
+}
+
+static RValue builtin_video_enable_loop(VMContext* ctx, RValue* args, int32_t argCount) {
+#if defined(PLATFORM_IOS)
+    bool enabled = true;
+    if (argCount >= 1) {
+        enabled = RValue_toBool(args[0]);
+    }
+    ButterscotchIOS_videoEnableLoop(enabled);
+    return RValue_makeUndefined();
+#else
+    logStubbedFunction(ctx, "video_enable_loop");
+    return RValue_makeUndefined();
+#endif
+}
+
+static RValue builtin_video_set_volume(VMContext* ctx, RValue* args, int32_t argCount) {
+#if defined(PLATFORM_IOS)
+    float volume = 1.0f;
+    if (argCount >= 1) {
+        volume = (float) RValue_toReal(args[0]);
+    }
+    if (volume < 0.0f) volume = 0.0f;
+    if (volume > 1.0f) volume = 1.0f;
+    ButterscotchIOS_videoSetVolume(volume);
+    return RValue_makeUndefined();
+#else
+    logStubbedFunction(ctx, "video_set_volume");
+    return RValue_makeUndefined();
+#endif
+}
+
+static RValue builtin_video_get_format(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+#if defined(PLATFORM_IOS)
+    return RValue_makeReal((GMLReal) ButterscotchIOS_videoGetFormat());
+#else
+    logStubbedFunction(ctx, "video_get_format");
+    return RValue_makeReal(0.0);
+#endif
+}
+
 static RValue builtin_window_get_width(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
     Runner* runner = ctx->runner;
     if (runner != nullptr && runner->getWindowSize != nullptr) {

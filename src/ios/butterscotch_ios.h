@@ -52,6 +52,11 @@ void ButterscotchIOS_setFreeCamera(float panX, float panY, float zoom);
 void ButterscotchIOS_suspendAudio(void);
 void ButterscotchIOS_resumeAudio(void);
 
+bool ButterscotchIOS_videoOpen(const char *absolutePath);
+void ButterscotchIOS_videoEnableLoop(bool enabled);
+void ButterscotchIOS_videoSetVolume(float volume);
+int32_t ButterscotchIOS_videoGetFormat(void);
+
 int32_t ButterscotchIOS_getTargetFrameHz(void);
 int32_t ButterscotchIOS_getRoomCount(void);
 const char *ButterscotchIOS_getRoomName(int32_t roomIndex);
