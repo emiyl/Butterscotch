@@ -16,11 +16,18 @@ NSString* ButterscotchDataDirectory(void) {
 }
 
 NSString* ButterscotchDataWinPath(void) {
-    return [[ButterscotchDataDirectory() stringByAppendingPathComponent:@"active_chapter"] stringByAppendingPathComponent:@"data.win"];
+    return ButterscotchPathFromDataDirectory(@"Undertale/data.win");
+}
+
+NSString* ButterscotchPathFromDataDirectory(NSString* relativePath) {
+    if (relativePath == nil || relativePath.length == 0) {
+        return ButterscotchDataDirectory();
+    }
+    return [ButterscotchDataDirectory() stringByAppendingPathComponent:relativePath];
 }
 
 NSString* ButterscotchInstructionsPath(void) {
-    return [ButterscotchDataDirectory() stringByAppendingPathComponent:@"PLACE_DATA_WIN_HERE.txt"];
+    return [ButterscotchDataDirectory() stringByAppendingPathComponent:@"PLACE_GAMES_HERE.txt"];
 }
 
 NSString* ButterscotchRuntimeLogPath(void) {
@@ -65,7 +72,16 @@ void RedirectStderrToRuntimeLog(void) {
 void EnsureDataDirectoryAndHintFile(void) {
     NSFileManager* fileManager = [NSFileManager defaultManager];
     NSString* dirPath = ButterscotchDataDirectory();
-    NSString* chapterDirPath = [dirPath stringByAppendingPathComponent:@"active_chapter"];
+    NSArray<NSString*>* requiredDirectories = @[
+        @"Undertale",
+        @"DELTARUNE",
+        @"DELTARUNE/mus",
+        @"DELTARUNE/chapter1_windows",
+        @"DELTARUNE/chapter2_windows",
+        @"DELTARUNE/chapter3_windows",
+        @"DELTARUNE/chapter4_windows",
+        @"DELTARUNE/chapter5_windows",
+    ];
     NSError* error = nil;
 
     if (![fileManager fileExistsAtPath:dirPath]) {
@@ -76,20 +92,51 @@ void EnsureDataDirectoryAndHintFile(void) {
         }
     }
 
-    if (![fileManager fileExistsAtPath:chapterDirPath]) {
-        [fileManager createDirectoryAtPath:chapterDirPath withIntermediateDirectories:YES attributes:nil error:&error];
+    for (NSString* relativeDir in requiredDirectories) {
+        NSString* fullPath = ButterscotchPathFromDataDirectory(relativeDir);
+        if ([fileManager fileExistsAtPath:fullPath]) {
+            continue;
+        }
+        [fileManager createDirectoryAtPath:fullPath withIntermediateDirectories:YES attributes:nil error:&error];
         if (error != nil) {
-            NSLog(@"Could not create active chapter directory %@: %@", chapterDirPath, error);
+            NSLog(@"Could not create directory %@: %@", fullPath, error);
+            error = nil;
+        }
+    }
+
+    // DELTARUNE chapters may request mus from chapterX_windows/mus. Link that to DELTARUNE/mus.
+    NSArray<NSString*>* chapterDirs = @[
+        @"DELTARUNE/chapter1_windows",
+        @"DELTARUNE/chapter2_windows",
+        @"DELTARUNE/chapter3_windows",
+        @"DELTARUNE/chapter4_windows",
+        @"DELTARUNE/chapter5_windows",
+    ];
+    for (NSString* chapterDir in chapterDirs) {
+        NSString* chapterMusPath = ButterscotchPathFromDataDirectory([chapterDir stringByAppendingPathComponent:@"mus"]);
+        if ([fileManager fileExistsAtPath:chapterMusPath]) {
+            continue;
+        }
+        [fileManager createSymbolicLinkAtPath:chapterMusPath withDestinationPath:@"../mus" error:&error];
+        if (error != nil) {
+            // If symlink creation fails, keep going; user can still place chapter-local mus.
+            NSLog(@"Could not create mus symlink %@: %@", chapterMusPath, error);
             error = nil;
         }
     }
 
     NSString* hintPath = ButterscotchInstructionsPath();
-    if (![fileManager fileExistsAtPath:hintPath]) {
-        NSString* hint = @"Place your GameMaker data.win file in active_chapter/data.win and relaunch Butterscotch.\nExpected filename: active_chapter/data.win\n";
-        [hint writeToFile:hintPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
-        if (error != nil) {
-            NSLog(@"Could not write hint file %@: %@", hintPath, error);
-        }
+    NSString* hint =
+        @"Place your game files using this layout:\n"
+         "- Undertale/data.win\n"
+         "- DELTARUNE/chapter1_windows/data.win\n"
+         "- DELTARUNE/chapter2_windows/data.win\n"
+         "- DELTARUNE/chapter3_windows/data.win\n"
+         "- DELTARUNE/chapter4_windows/data.win\n"
+         "- DELTARUNE/chapter5_windows/data.win\n"
+         "- DELTARUNE/mus\n";
+    [hint writeToFile:hintPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
+    if (error != nil) {
+        NSLog(@"Could not write hint file %@: %@", hintPath, error);
     }
 }

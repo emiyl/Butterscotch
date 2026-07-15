@@ -10,6 +10,7 @@
 
 static const uint8_t BS_KEY_SOURCE_TOUCH = 1;
 static const uint8_t BS_KEY_SOURCE_CONTROLLER = 2;
+
 static const NSTimeInterval BS_MENU_AUTO_HIDE_SECONDS = 3.0;
 
 static const int32_t BS_KEY_ACTION_A = 'Z';
@@ -17,7 +18,64 @@ static const int32_t BS_KEY_ACTION_B = 'X';
 static const int32_t BS_KEY_ACTION_X = 'C';
 static const int32_t BS_KEY_ACTION_Y = 'V';
 
+static const int32_t BS_KEY_DIR_LEFT_ALT = 'A';
+static const int32_t BS_KEY_DIR_RIGHT_ALT = 'D';
+static const int32_t BS_KEY_DIR_UP_ALT = 'W';
+static const int32_t BS_KEY_DIR_DOWN_ALT = 'S';
+
+static NSString* const BS_SETTING_SPEED_MULTIPLIER = @"bs.settings.speedMultiplier";
+static NSString* const BS_SETTING_NINTENDO_SWAP = @"bs.settings.nintendoSwap";
+
+static NSInteger BSLoadSpeedMultiplier(void) {
+    NSInteger value = [[NSUserDefaults standardUserDefaults] integerForKey:BS_SETTING_SPEED_MULTIPLIER];
+    if (value < 1 || value > 4) {
+        return 1;
+    }
+    return value;
+}
+
+static void BSSaveSpeedMultiplier(NSInteger value) {
+    NSInteger clamped = value;
+    if (clamped < 1) clamped = 1;
+    if (clamped > 4) clamped = 4;
+    [[NSUserDefaults standardUserDefaults] setInteger:clamped forKey:BS_SETTING_SPEED_MULTIPLIER];
+}
+
+static BOOL BSLoadNintendoSwap(void) {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:BS_SETTING_NINTENDO_SWAP];
+}
+
+static void BSSaveNintendoSwap(BOOL enabled) {
+    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:BS_SETTING_NINTENDO_SWAP];
+}
+
+static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
+    static NSArray<NSDictionary<NSString*, NSString*>*>* catalog = nil;
+    if (catalog == nil) {
+        catalog = @[
+            @{ @"key": @"undertale", @"title": @"Undertale", @"relative": @"Undertale/data.win" },
+            @{ @"key": @"dr_ch1", @"title": @"DELTARUNE Chapter 1", @"relative": @"DELTARUNE/chapter1_windows/data.win" },
+            @{ @"key": @"dr_ch2", @"title": @"DELTARUNE Chapter 2", @"relative": @"DELTARUNE/chapter2_windows/data.win" },
+            @{ @"key": @"dr_ch3", @"title": @"DELTARUNE Chapter 3", @"relative": @"DELTARUNE/chapter3_windows/data.win" },
+            @{ @"key": @"dr_ch4", @"title": @"DELTARUNE Chapter 4", @"relative": @"DELTARUNE/chapter4_windows/data.win" },
+            @{ @"key": @"dr_ch5", @"title": @"DELTARUNE Chapter 5", @"relative": @"DELTARUNE/chapter5_windows/data.win" },
+        ];
+    }
+    return catalog;
+}
+
+@class ButterscotchGameViewController;
+
+@protocol ButterscotchGameViewControllerDelegate <NSObject>
+- (void)gameViewControllerDidRequestReturnToLibrary:(ButterscotchGameViewController*)controller;
+@end
+
 @interface ButterscotchGameViewController : GLKViewController
+@property(strong, nonatomic) NSString* launchKey;
+@property(strong, nonatomic) NSString* launchTitle;
+@property(strong, nonatomic) NSString* launchRelativeDataWinPath;
+@property(assign, nonatomic) id<ButterscotchGameViewControllerDelegate> delegate;
+
 @property(strong, nonatomic) UILabel* statusLabel;
 @property(strong, nonatomic) UIButton* menuButton;
 @property(strong, nonatomic) UITextView* debugTextView;
@@ -46,6 +104,9 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
 @property(strong, nonatomic) NSLayoutConstraint* gameViewTopConstraint;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewBottomConstraint;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewPortraitHeightConstraint;
+
+- (instancetype)initWithLaunchInfo:(NSDictionary<NSString*, NSString*>*)launchInfo;
+- (void)shutdownRunnerSession;
 - (void)appendDebugLine:(NSString*)line;
 - (void)setupVirtualControls;
 - (void)rebuildOptionsMenu;
@@ -70,11 +131,24 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     uint8_t _keySourceMask[GML_KEY_COUNT];
 }
 
+- (instancetype)initWithLaunchInfo:(NSDictionary<NSString*, NSString*>*)launchInfo {
+    self = [super initWithNibName:nil bundle:nil];
+    if (self != nil) {
+        self.launchKey = launchInfo[@"key"];
+        self.launchTitle = launchInfo[@"title"];
+        self.launchRelativeDataWinPath = launchInfo[@"relative"];
+        self.modalPresentationStyle = UIModalPresentationFullScreen;
+    }
+    return self;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
 
     self.view.backgroundColor = [UIColor colorWithRed:0.08 green:0.09 blue:0.11 alpha:1.0];
     self.preferredFramesPerSecond = 60;
+    self.paused = YES;
+
     self.runnerStarted = NO;
     self.mouseDown = NO;
     self.sawNoPresentResult = NO;
@@ -88,21 +162,20 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     self.lastDisplayLinkTimestamp = 0.0;
     self.logVisible = NO;
     self.controlsVisible = YES;
-    self.preferNintendoFaceSwap = NO;
+    self.preferNintendoFaceSwap = BSLoadNintendoSwap();
     self.debugLines = [NSMutableArray array];
 
     self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(onDisplayLinkTick:)];
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
     [GCController startWirelessControllerDiscoveryWithCompletionHandler:nil];
-
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onControllerConnected:) name:GCControllerDidConnectNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onControllerDisconnected:) name:GCControllerDidDisconnectNotification object:nil];
 
     self.menuButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.menuButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.menuButton setTitle:@"..." forState:UIControlStateNormal];
-    self.menuButton.titleLabel.font = [UIFont monospacedSystemFontOfSize:18.0 weight:UIFontWeightSemibold];
+    [self.menuButton setTitle:@"Menu" forState:UIControlStateNormal];
+    self.menuButton.titleLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
     self.menuButton.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.85];
     self.menuButton.layer.cornerRadius = 8.0;
     self.menuButton.contentEdgeInsets = UIEdgeInsetsMake(6, 12, 6, 12);
@@ -130,8 +203,8 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     self.statusLabel.font = [UIFont monospacedSystemFontOfSize:15.0 weight:UIFontWeightRegular];
     self.statusLabel.textAlignment = NSTextAlignmentLeft;
     self.statusLabel.text = @"Preparing Butterscotch...";
-
     [self.view addSubview:self.statusLabel];
+
     [NSLayoutConstraint activateConstraints:@[
         [self.menuButton.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-16.0],
         [self.menuButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:12.0],
@@ -148,6 +221,7 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
 
     [self setupVirtualControls];
 
+    [self appendDebugLine:[NSString stringWithFormat:@"[host] launch: %@", self.launchTitle]];
     [self appendDebugLine:[NSString stringWithFormat:@"[host] data folder: %@", ButterscotchDataDirectory()]];
     [self appendDebugLine:[NSString stringWithFormat:@"[host] runtime log: %@", ButterscotchRuntimeLogPath()]];
     [self attemptStartRunner];
@@ -162,10 +236,8 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     [self.menuAutoHideTimer invalidate];
     self.menuAutoHideTimer = nil;
 
-    if (self.runnerStarted) {
-        ButterscotchIOS_stopRunner();
-        self.runnerStarted = NO;
-    }
+    [self shutdownRunnerSession];
+
     if ([EAGLContext currentContext] == self.glContext) {
         [EAGLContext setCurrentContext:nil];
     }
@@ -174,13 +246,27 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
 #endif
 }
 
+- (void)shutdownRunnerSession {
+    if (!self.runnerStarted) {
+        return;
+    }
+
+    ButterscotchIOS_stopRunner();
+    self.runnerStarted = NO;
+    self.accumulatedDisplaySeconds = 0.0f;
+    self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+    self.lastDisplayLinkTimestamp = 0.0;
+    for (int32_t i = 0; i < GML_KEY_COUNT; i++) {
+        _keySourceMask[i] = 0;
+    }
+}
+
 - (void)appendDebugLine:(NSString*)line {
     if (line == nil || line.length == 0) {
         return;
     }
 
-    NSString* stamped = [NSString stringWithFormat:@"%@", line];
-    [self.debugLines addObject:stamped];
+    [self.debugLines addObject:line];
     if (self.debugLines.count > 220) {
         [self.debugLines removeObjectsInRange:NSMakeRange(0, self.debugLines.count - 220)];
     }
@@ -201,12 +287,10 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
 
     UIView* dpad = [[UIView alloc] initWithFrame:CGRectZero];
     dpad.translatesAutoresizingMaskIntoConstraints = NO;
-    dpad.backgroundColor = [UIColor clearColor];
     [self.controlsContainer addSubview:dpad];
 
     UIView* abxy = [[UIView alloc] initWithFrame:CGRectZero];
     abxy.translatesAutoresizingMaskIntoConstraints = NO;
-    abxy.backgroundColor = [UIColor clearColor];
     [self.controlsContainer addSubview:abxy];
 
     UIButton* up = [self controlButtonWithTitle:@"^" keyCode:VK_UP];
@@ -307,13 +391,35 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     return self.preferNintendoFaceSwap ? BS_KEY_ACTION_X : BS_KEY_ACTION_Y;
 }
 
+- (void)setDirectionalKeysForArrow:(int32_t)arrow source:(uint8_t)source down:(BOOL)down {
+    if (arrow == VK_LEFT) {
+        [self setVirtualKey:VK_LEFT source:source down:down];
+        [self setVirtualKey:BS_KEY_DIR_LEFT_ALT source:source down:down];
+    } else if (arrow == VK_RIGHT) {
+        [self setVirtualKey:VK_RIGHT source:source down:down];
+        [self setVirtualKey:BS_KEY_DIR_RIGHT_ALT source:source down:down];
+    } else if (arrow == VK_UP) {
+        [self setVirtualKey:VK_UP source:source down:down];
+        [self setVirtualKey:BS_KEY_DIR_UP_ALT source:source down:down];
+    } else if (arrow == VK_DOWN) {
+        [self setVirtualKey:VK_DOWN source:source down:down];
+        [self setVirtualKey:BS_KEY_DIR_DOWN_ALT source:source down:down];
+    }
+}
+
 - (void)onControlButtonDown:(UIButton*)sender {
     [self registerUserInteraction];
     if (sender.selected) {
         return;
     }
     sender.selected = YES;
-    [self setVirtualKey:(int32_t) sender.tag source:BS_KEY_SOURCE_TOUCH down:YES];
+
+    int32_t key = (int32_t) sender.tag;
+    if (key == VK_LEFT || key == VK_RIGHT || key == VK_UP || key == VK_DOWN) {
+        [self setDirectionalKeysForArrow:key source:BS_KEY_SOURCE_TOUCH down:YES];
+    } else {
+        [self setVirtualKey:key source:BS_KEY_SOURCE_TOUCH down:YES];
+    }
 }
 
 - (void)onControlButtonUp:(UIButton*)sender {
@@ -322,7 +428,13 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
         return;
     }
     sender.selected = NO;
-    [self setVirtualKey:(int32_t) sender.tag source:BS_KEY_SOURCE_TOUCH down:NO];
+
+    int32_t key = (int32_t) sender.tag;
+    if (key == VK_LEFT || key == VK_RIGHT || key == VK_UP || key == VK_DOWN) {
+        [self setDirectionalKeysForArrow:key source:BS_KEY_SOURCE_TOUCH down:NO];
+    } else {
+        [self setVirtualKey:key source:BS_KEY_SOURCE_TOUCH down:NO];
+    }
 }
 
 - (void)setVirtualKey:(int32_t)keyCode source:(uint8_t)source down:(BOOL)down {
@@ -390,10 +502,10 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
         }
     }
 
-    [self setVirtualKey:VK_LEFT source:BS_KEY_SOURCE_CONTROLLER down:wantLeft];
-    [self setVirtualKey:VK_RIGHT source:BS_KEY_SOURCE_CONTROLLER down:wantRight];
-    [self setVirtualKey:VK_UP source:BS_KEY_SOURCE_CONTROLLER down:wantUp];
-    [self setVirtualKey:VK_DOWN source:BS_KEY_SOURCE_CONTROLLER down:wantDown];
+    [self setDirectionalKeysForArrow:VK_LEFT source:BS_KEY_SOURCE_CONTROLLER down:wantLeft];
+    [self setDirectionalKeysForArrow:VK_RIGHT source:BS_KEY_SOURCE_CONTROLLER down:wantRight];
+    [self setDirectionalKeysForArrow:VK_UP source:BS_KEY_SOURCE_CONTROLLER down:wantUp];
+    [self setDirectionalKeysForArrow:VK_DOWN source:BS_KEY_SOURCE_CONTROLLER down:wantDown];
 
     [self setVirtualKey:[self mappedActionKeyForLogicalA] source:BS_KEY_SOURCE_CONTROLLER down:wantA];
     [self setVirtualKey:[self mappedActionKeyForLogicalB] source:BS_KEY_SOURCE_CONTROLLER down:wantB];
@@ -405,49 +517,60 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
 - (void)rebuildOptionsMenu {
     if (@available(iOS 14.0, *)) {
         __unsafe_unretained typeof(self) weakSelf = self;
-        UIAction* refreshAction = [UIAction actionWithTitle:@"Refresh" image:nil identifier:nil handler:^(__kindof UIAction* action) {
+
+        UIAction* backAction = [UIAction actionWithTitle:@"Back to library" image:nil identifier:nil handler:^(__kindof UIAction* action) {
             (void) action;
             [weakSelf registerUserInteraction];
-            [weakSelf onRefreshTapped];
+            if (weakSelf.delegate != nil) {
+                [weakSelf.delegate gameViewControllerDidRequestReturnToLibrary:weakSelf];
+            }
         }];
 
-        NSString* logTitle = self.logVisible ? @"Hide Log" : @"Show Log";
+        // UIAction* refreshAction = [UIAction actionWithTitle:@"Refresh" image:nil identifier:nil handler:^(__kindof UIAction* action) {
+        //     (void) action;
+        //     [weakSelf registerUserInteraction];
+        //     [weakSelf onRefreshTapped];
+        // }];
+
+        NSString* logTitle = self.logVisible ? @"Hide Log" : @"Show log";
         UIAction* logAction = [UIAction actionWithTitle:logTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
             (void) action;
             [weakSelf registerUserInteraction];
             weakSelf.logVisible = !weakSelf.logVisible;
             weakSelf.debugTextView.hidden = !weakSelf.logVisible;
-            [weakSelf appendDebugLine:[NSString stringWithFormat:@"[host] log %@", weakSelf.logVisible ? @"shown" : @"hidden"]];
             [weakSelf rebuildOptionsMenu];
         }];
 
-        NSString* controlsTitle = self.controlsVisible ? @"Hide On-Screen Controller" : @"Show On-Screen Controller";
+        NSString* controlsTitle = self.controlsVisible ? @"Hide on-screen controller" : @"Show on-screen controller";
         UIAction* controlsAction = [UIAction actionWithTitle:controlsTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
             (void) action;
             [weakSelf registerUserInteraction];
             weakSelf.controlsVisible = !weakSelf.controlsVisible;
             weakSelf.controlsContainer.hidden = !weakSelf.controlsVisible;
-            [weakSelf appendDebugLine:[NSString stringWithFormat:@"[host] onscreen controller %@", weakSelf.controlsVisible ? @"shown" : @"hidden"]];
             [weakSelf rebuildOptionsMenu];
         }];
 
-        NSString* swapTitle = self.preferNintendoFaceSwap ? @"Nintendo A/B + X/Y: On" : @"Nintendo A/B + X/Y: Off";
-        UIAction* swapAction = [UIAction actionWithTitle:swapTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
-            (void) action;
-            [weakSelf registerUserInteraction];
-            weakSelf.preferNintendoFaceSwap = !weakSelf.preferNintendoFaceSwap;
-            [weakSelf appendDebugLine:[NSString stringWithFormat:@"[host] nintendo face swap %@", weakSelf.preferNintendoFaceSwap ? @"enabled" : @"disabled"]];
-            [weakSelf rebuildOptionsMenu];
-        }];
+        // NSString* swapTitle = self.preferNintendoFaceSwap ? @"Nintendo A/B + X/Y: On" : @"Nintendo A/B + X/Y: Off";
+        // UIAction* swapAction = [UIAction actionWithTitle:swapTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
+        //     (void) action;
+        //     [weakSelf registerUserInteraction];
+        //     weakSelf.preferNintendoFaceSwap = !weakSelf.preferNintendoFaceSwap;
+        //     BSSaveNintendoSwap(weakSelf.preferNintendoFaceSwap);
+        //     [weakSelf rebuildOptionsMenu];
+        // }];
 
-        self.menuButton.menu = [UIMenu menuWithTitle:@"" children:@[refreshAction, logAction, controlsAction, swapAction]];
+        self.menuButton.menu = [UIMenu menuWithTitle:@"" children:@[
+            backAction,
+            // refreshAction,
+            logAction, controlsAction,
+            // swapAction
+        ]];
         self.menuButton.showsMenuAsPrimaryAction = YES;
     }
 }
 
 - (void)registerUserInteraction {
     self.menuButton.hidden = NO;
-    self.menuButton.alpha = 1.0;
     [self resetMenuAutoHideTimer];
 }
 
@@ -466,13 +589,13 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
 - (void)onControllerConnected:(NSNotification*)notification {
     (void) notification;
     [self registerUserInteraction];
-    [self appendDebugLine:@"[host] bluetooth controller connected"]; 
+    [self appendDebugLine:@"[host] bluetooth controller connected"];
 }
 
 - (void)onControllerDisconnected:(NSNotification*)notification {
     (void) notification;
     [self registerUserInteraction];
-    [self appendDebugLine:@"[host] bluetooth controller disconnected"]; 
+    [self appendDebugLine:@"[host] bluetooth controller disconnected"];
 }
 
 - (void)pollRuntimeLog {
@@ -504,20 +627,15 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     }
 
     NSArray<NSString*>* lines = [chunk componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
-    NSUInteger suppressedCount = 0;
     for (NSString* line in lines) {
         NSString* trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (trimmed.length == 0) {
             continue;
         }
         if (!ShouldDisplayRuntimeLogLine(trimmed)) {
-            suppressedCount += 1;
             continue;
         }
         [self appendDebugLine:[NSString stringWithFormat:@"[stderr] %@", trimmed]];
-    }
-    if (suppressedCount > 0) {
-        [self appendDebugLine:[NSString stringWithFormat:@"[stderr] ... %lu noisy lines hidden", (unsigned long) suppressedCount]];
     }
 }
 
@@ -526,19 +644,16 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     RedirectStderrToRuntimeLog();
     [self pollRuntimeLog];
 
-    NSString* dataWinPath = ButterscotchDataWinPath();
+    NSString* dataWinPath = ButterscotchPathFromDataDirectory(self.launchRelativeDataWinPath);
     if (![[NSFileManager defaultManager] fileExistsAtPath:dataWinPath]) {
         [self appendDebugLine:[NSString stringWithFormat:@"[host] missing data.win at %@", dataWinPath]];
         [self refreshStatus];
         return;
     }
 
-    [self appendDebugLine:[NSString stringWithFormat:@"[host] attempting runner start with %@", dataWinPath]];
-
     self.glContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES3];
     if (self.glContext == nil) {
         self.statusLabel.text = @"Failed to create OpenGL ES 3 context.";
-        [self appendDebugLine:@"[host] failed to create OpenGL ES 3 context"]; 
         return;
     }
 
@@ -571,24 +686,21 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
 
     [EAGLContext setCurrentContext:self.glContext];
 
-    NSString* savesPath = [ButterscotchDataDirectory() stringByAppendingPathComponent:@"saves"];
+    NSString* savesPath = ButterscotchPathFromDataDirectory([NSString stringWithFormat:@"saves/%@", self.launchKey]);
     NSError* error = nil;
     [[NSFileManager defaultManager] createDirectoryAtPath:savesPath withIntermediateDirectories:YES attributes:nil error:&error];
     if (error != nil) {
-        NSLog(@"Could not create saves directory %@: %@", savesPath, error);
         [self appendDebugLine:[NSString stringWithFormat:@"[host] failed to create saves dir: %@", error.localizedDescription]];
     }
 
     [self.gameView bindDrawable];
     GLint hostFramebuffer = 0;
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &hostFramebuffer);
-    [self appendDebugLine:[NSString stringWithFormat:@"[gl] startup framebuffer binding: %d", (int) hostFramebuffer]];
 
     BOOL started = ButterscotchIOS_startRunner(dataWinPath.UTF8String, savesPath.UTF8String, BS_IOS_OS_IOS, (uint32_t) hostFramebuffer);
     [self pollRuntimeLog];
     if (!started) {
         self.statusLabel.text = @"Found data.win, but runner failed to start.";
-        [self appendDebugLine:@"[host] ButterscotchIOS_startRunner returned false"]; 
         return;
     }
 
@@ -601,7 +713,6 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
     self.lastDisplayLinkTimestamp = 0.0;
     self.statusLabel.hidden = YES;
-    [self appendDebugLine:@"[host] runner started"]; 
 
     int32_t targetHz = ButterscotchIOS_getTargetFrameHz();
     if (targetHz > 10 && targetHz <= 240) {
@@ -610,7 +721,6 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     } else {
         self.fixedStepDeltaSeconds = 1.0f / 60.0f;
     }
-    [self appendDebugLine:[NSString stringWithFormat:@"[host] target fps: %ld", (long) self.preferredFramesPerSecond]];
 
     if (self.preferredFramesPerSecond > 0) {
         self.displayLink.preferredFramesPerSecond = self.preferredFramesPerSecond;
@@ -618,32 +728,23 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
 }
 
 - (void)refreshStatus {
+    NSString* required = ButterscotchPathFromDataDirectory(self.launchRelativeDataWinPath);
     self.statusLabel.hidden = NO;
     self.statusLabel.text = [NSString stringWithFormat:
         @"Butterscotch iOS\n\n"
-         "No data.win found.\n\n"
-         "Open Files > On My iPhone/iPad > Butterscotch\n"
-         "and copy your game file there as active_chapter/data.win, then tap Refresh.\n\n"
-         "Folder:\n%@",
-        ButterscotchDataDirectory()];
+         "%@ data.win missing.\n\n"
+         "Expected path:\n%@\n\n"
+         "Open Files > On My iPhone/iPad > Butterscotch and copy your files, then tap Refresh.",
+        self.launchTitle,
+        required];
 }
 
 - (void)onRefreshTapped {
     [self registerUserInteraction];
-    [self appendDebugLine:@"[host] manual refresh tapped"]; 
     [self pollRuntimeLog];
 
-    if (self.runnerStarted) {
-        ButterscotchIOS_stopRunner();
-        self.runnerStarted = NO;
-        for (int32_t i = 0; i < GML_KEY_COUNT; i++) {
-            _keySourceMask[i] = 0;
-        }
-        [self appendDebugLine:@"[host] previous runner stopped"]; 
-    }
-
+    [self shutdownRunnerSession];
     [self attemptStartRunner];
-    [self pollRuntimeLog];
 }
 
 - (void)onDisplayLinkTick:(CADisplayLink*)link {
@@ -652,9 +753,8 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     }
 
     self.displayLinkTickCounter += 1;
-    // if (self.displayLinkTickCounter % 120 == 0) {
-    //     [self appendDebugLine:[NSString stringWithFormat:@"[host] display tick %llu", self.displayLinkTickCounter]];
-    // }
+
+    self.preferNintendoFaceSwap = BSLoadNintendoSwap();
 
     if (self.runnerStarted) {
         [self updateControllerInputState];
@@ -684,7 +784,8 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
             return;
         }
 
-        self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+        NSInteger speedMultiplier = BSLoadSpeedMultiplier();
+        self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds * (float) speedMultiplier;
         self.accumulatedDisplaySeconds -= self.fixedStepDeltaSeconds;
         if (self.accumulatedDisplaySeconds > self.fixedStepDeltaSeconds * 4.0f) {
             self.accumulatedDisplaySeconds = self.fixedStepDeltaSeconds;
@@ -704,10 +805,6 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     }
 
     self.hostFrameCounter += 1;
-    if (!self.sawFirstDrawCallback) {
-        self.sawFirstDrawCallback = YES;
-        [self appendDebugLine:[NSString stringWithFormat:@"[host] first draw callback (%d x %d)", (int) view.drawableWidth, (int) view.drawableHeight]];
-    }
 
     float dt = self.pendingFrameDeltaSeconds;
     if (dt <= 0.0f) {
@@ -725,40 +822,15 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     int32_t result = ButterscotchIOS_stepAndDraw((int32_t) (view.drawableWidth), (int32_t) (view.drawableHeight), dt);
     [self pollRuntimeLog];
 
-    // if (self.hostFrameCounter % 120 == 0) {
-    //     [self appendDebugLine:[NSString stringWithFormat:@"[host] frame %llu result=%d size=%dx%d", self.hostFrameCounter, (int) result, (int) view.drawableWidth, (int) view.drawableHeight]];
-    // }
-
     GLenum glErr = glGetError();
     if (glErr != GL_NO_ERROR) {
         [self appendDebugLine:[NSString stringWithFormat:@"[gl] glGetError = 0x%04x", (unsigned int) glErr]];
     }
 
-    if (result == BS_IOS_CONTINUE_NO_PRESENT && !self.sawNoPresentResult) {
-        self.sawNoPresentResult = YES;
-        [self appendDebugLine:@"[host] frame returned CONTINUE_NO_PRESENT"]; 
-    }
-
     if (result == BS_IOS_SHOULD_EXIT) {
-        [self appendDebugLine:@"[host] runner requested exit"]; 
-        ButterscotchIOS_stopRunner();
-        self.runnerStarted = NO;
-        for (int32_t i = 0; i < GML_KEY_COUNT; i++) {
-            _keySourceMask[i] = 0;
-        }
+        [self shutdownRunnerSession];
         [self refreshStatus];
     }
-}
-
-- (void)updateMouseFromTouch:(UITouch*)touch inView:(UIView*)view {
-    UIView* targetView = self.gameView != nil ? self.gameView : view;
-    CGPoint point = [touch locationInView:targetView];
-    CGSize size = targetView.bounds.size;
-    if (size.width <= 0.0 || size.height <= 0.0) return;
-
-    float normalizedX = (float) (point.x / size.width);
-    float normalizedY = (float) (point.y / size.height);
-    ButterscotchIOS_setNormalizedCursorPosition(normalizedX, normalizedY);
 }
 
 - (BOOL)shouldHandleTouchAsGameMouse:(UITouch*)touch {
@@ -779,6 +851,17 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     }
 
     return YES;
+}
+
+- (void)updateMouseFromTouch:(UITouch*)touch inView:(UIView*)view {
+    UIView* targetView = self.gameView != nil ? self.gameView : view;
+    CGPoint point = [touch locationInView:targetView];
+    CGSize size = targetView.bounds.size;
+    if (size.width <= 0.0 || size.height <= 0.0) return;
+
+    float normalizedX = (float) (point.x / size.width);
+    float normalizedY = (float) (point.y / size.height);
+    ButterscotchIOS_setNormalizedCursorPosition(normalizedX, normalizedY);
 }
 
 - (void)viewDidLayoutSubviews {
@@ -812,8 +895,7 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
 - (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
     (void) event;
     [self registerUserInteraction];
-    if (!self.runnerStarted) return;
-    if (!self.mouseDown) return;
+    if (!self.runnerStarted || !self.mouseDown) return;
     UITouch* touch = touches.anyObject;
     if (touch == nil) return;
     [self updateMouseFromTouch:touch inView:self.view];
@@ -823,8 +905,7 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     (void) touches;
     (void) event;
     [self registerUserInteraction];
-    if (!self.runnerStarted) return;
-    if (!self.mouseDown) return;
+    if (!self.runnerStarted || !self.mouseDown) return;
     self.mouseDown = NO;
     ButterscotchIOS_setMouseButtonState(0, false);
 }
@@ -833,16 +914,239 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     (void) touches;
     (void) event;
     [self registerUserInteraction];
-    if (!self.runnerStarted) return;
-    if (!self.mouseDown) return;
+    if (!self.runnerStarted || !self.mouseDown) return;
     self.mouseDown = NO;
     ButterscotchIOS_setMouseButtonState(0, false);
 }
 
 @end
 
+@class ButterscotchAppCoordinator;
+
+@interface ButterscotchLibraryViewController : UITableViewController
+@property(assign, nonatomic) ButterscotchAppCoordinator* coordinator;
+@end
+
+@interface ButterscotchSettingsViewController : UIViewController
+@property(strong, nonatomic) UISegmentedControl* speedControl;
+@property(strong, nonatomic) UISwitch* nintendoSwapSwitch;
+@end
+
+@interface ButterscotchAppCoordinator : NSObject <ButterscotchGameViewControllerDelegate>
+@property(strong, nonatomic) UITabBarController* rootTabBarController;
+@property(strong, nonatomic) ButterscotchLibraryViewController* libraryController;
+@property(strong, nonatomic) ButterscotchSettingsViewController* settingsController;
+@property(strong, nonatomic) ButterscotchGameViewController* activeGameController;
+@property(strong, nonatomic) NSDictionary<NSString*, NSString*>* activeLaunchInfo;
+- (UIViewController*)buildRootController;
+- (BOOL)hasActiveGame;
+- (void)resumeActiveGame;
+- (void)handleLaunchSelection:(NSDictionary<NSString*, NSString*>*)launchInfo fromPresenter:(UIViewController*)presenter;
+@end
+
+@implementation ButterscotchLibraryViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Games";
+    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"LaunchCell"];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    if ([self.coordinator hasActiveGame]) {
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Return To Game" style:UIBarButtonItemStylePlain target:self action:@selector(onReturnToGame)];
+    } else {
+        self.navigationItem.rightBarButtonItem = nil;
+    }
+}
+
+- (void)onReturnToGame {
+    [self.coordinator resumeActiveGame];
+}
+
+- (NSInteger)tableView:(UITableView*)tableView numberOfRowsInSection:(NSInteger)section {
+    (void) tableView;
+    (void) section;
+    return BSLaunchCatalog().count;
+}
+
+- (UITableViewCell*)tableView:(UITableView*)tableView cellForRowAtIndexPath:(NSIndexPath*)indexPath {
+    UITableViewCell* cell = [tableView dequeueReusableCellWithIdentifier:@"LaunchCell" forIndexPath:indexPath];
+    NSDictionary<NSString*, NSString*>* launchInfo = BSLaunchCatalog()[(NSUInteger) indexPath.row];
+    cell.textLabel.text = launchInfo[@"title"];
+    cell.detailTextLabel.text = nil;
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    return cell;
+}
+
+- (void)tableView:(UITableView*)tableView didSelectRowAtIndexPath:(NSIndexPath*)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSDictionary<NSString*, NSString*>* launchInfo = BSLaunchCatalog()[(NSUInteger) indexPath.row];
+    [self.coordinator handleLaunchSelection:launchInfo fromPresenter:self];
+}
+
+@end
+
+@implementation ButterscotchSettingsViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+
+    self.title = @"Settings";
+    self.view.backgroundColor = [UIColor systemBackgroundColor];
+
+    UILabel* speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    speedLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    speedLabel.text = @"Speed Multiplier";
+    speedLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+
+    self.speedControl = [[UISegmentedControl alloc] initWithItems:@[@"1x", @"2x", @"3x", @"4x"]];
+    self.speedControl.translatesAutoresizingMaskIntoConstraints = NO;
+    NSInteger speedMultiplier = BSLoadSpeedMultiplier();
+    self.speedControl.selectedSegmentIndex = speedMultiplier - 1;
+    [self.speedControl addTarget:self action:@selector(onSpeedChanged:) forControlEvents:UIControlEventValueChanged];
+
+    UILabel* swapLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    swapLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    swapLabel.text = @"Nintendo A/B + X/Y Swap";
+    swapLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+
+    self.nintendoSwapSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
+    self.nintendoSwapSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    self.nintendoSwapSwitch.on = BSLoadNintendoSwap();
+    [self.nintendoSwapSwitch addTarget:self action:@selector(onSwapChanged:) forControlEvents:UIControlEventValueChanged];
+
+    UILabel* noteLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    noteLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    noteLabel.numberOfLines = 0;
+    noteLabel.textColor = [UIColor secondaryLabelColor];
+    noteLabel.text = @"Settings are saved on-device and applied to future game sessions.";
+
+    [self.view addSubview:speedLabel];
+    [self.view addSubview:self.speedControl];
+    [self.view addSubview:swapLabel];
+    [self.view addSubview:self.nintendoSwapSwitch];
+    [self.view addSubview:noteLabel];
+
+    UILayoutGuide* safe = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [speedLabel.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:20.0],
+        [speedLabel.topAnchor constraintEqualToAnchor:safe.topAnchor constant:24.0],
+
+        [self.speedControl.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:20.0],
+        [self.speedControl.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-20.0],
+        [self.speedControl.topAnchor constraintEqualToAnchor:speedLabel.bottomAnchor constant:12.0],
+
+        [swapLabel.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:20.0],
+        [swapLabel.topAnchor constraintEqualToAnchor:self.speedControl.bottomAnchor constant:28.0],
+
+        [self.nintendoSwapSwitch.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-20.0],
+        [self.nintendoSwapSwitch.centerYAnchor constraintEqualToAnchor:swapLabel.centerYAnchor],
+
+        [noteLabel.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:20.0],
+        [noteLabel.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-20.0],
+        [noteLabel.topAnchor constraintEqualToAnchor:swapLabel.bottomAnchor constant:20.0],
+    ]];
+}
+
+- (void)onSpeedChanged:(UISegmentedControl*)sender {
+    NSInteger multiplier = sender.selectedSegmentIndex + 1;
+    BSSaveSpeedMultiplier(multiplier);
+}
+
+- (void)onSwapChanged:(UISwitch*)sender {
+    BSSaveNintendoSwap(sender.on);
+}
+
+@end
+
+@implementation ButterscotchAppCoordinator
+
+- (UIViewController*)buildRootController {
+    self.libraryController = [ButterscotchLibraryViewController new];
+    self.libraryController.coordinator = self;
+
+    self.settingsController = [ButterscotchSettingsViewController new];
+
+    UINavigationController* libraryNav = [[UINavigationController alloc] initWithRootViewController:self.libraryController];
+    UINavigationController* settingsNav = [[UINavigationController alloc] initWithRootViewController:self.settingsController];
+
+    libraryNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Library" image:[UIImage systemImageNamed:@"list.bullet.rectangle"] tag:0];
+    settingsNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Settings" image:[UIImage systemImageNamed:@"gearshape"] tag:1];
+
+    self.rootTabBarController = [UITabBarController new];
+    self.rootTabBarController.viewControllers = @[libraryNav, settingsNav];
+
+    return self.rootTabBarController;
+}
+
+- (BOOL)hasActiveGame {
+    return self.activeGameController != nil;
+}
+
+- (void)resumeActiveGame {
+    if (self.activeGameController == nil) {
+        return;
+    }
+    if (self.rootTabBarController.presentedViewController == self.activeGameController) {
+        return;
+    }
+    [self.rootTabBarController presentViewController:self.activeGameController animated:YES completion:nil];
+}
+
+- (void)startLaunchInfo:(NSDictionary<NSString*, NSString*>*)launchInfo {
+    ButterscotchGameViewController* controller = [[ButterscotchGameViewController alloc] initWithLaunchInfo:launchInfo];
+    controller.delegate = self;
+    self.activeGameController = controller;
+    self.activeLaunchInfo = launchInfo;
+
+    [self.rootTabBarController presentViewController:controller animated:YES completion:nil];
+}
+
+- (void)handleLaunchSelection:(NSDictionary<NSString*, NSString*>*)launchInfo fromPresenter:(UIViewController*)presenter {
+    if (self.activeGameController == nil) {
+        [self startLaunchInfo:launchInfo];
+        return;
+    }
+
+    NSString* selectedKey = launchInfo[@"key"];
+    NSString* activeKey = self.activeLaunchInfo[@"key"];
+    if (selectedKey != nil && [selectedKey isEqualToString:activeKey]) {
+        [self resumeActiveGame];
+        return;
+    }
+
+    __unsafe_unretained typeof(self) weakSelf = self;
+    UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"Launch New Chapter?"
+                                                                   message:@"Unsaved progress in the current session will be lost."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Launch" style:UIAlertActionStyleDestructive handler:^(UIAlertAction* action) {
+        (void) action;
+        [weakSelf.activeGameController shutdownRunnerSession];
+        if (weakSelf.rootTabBarController.presentedViewController == weakSelf.activeGameController) {
+            [weakSelf.activeGameController dismissViewControllerAnimated:NO completion:nil];
+        }
+        weakSelf.activeGameController = nil;
+        weakSelf.activeLaunchInfo = nil;
+        [weakSelf startLaunchInfo:launchInfo];
+    }]];
+
+    [presenter presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)gameViewControllerDidRequestReturnToLibrary:(ButterscotchGameViewController*)controller {
+    if (self.rootTabBarController.presentedViewController == controller) {
+        [controller dismissViewControllerAnimated:YES completion:nil];
+    }
+}
+
+@end
+
 @interface ButterscotchAppDelegate : UIResponder <UIApplicationDelegate>
 @property(strong, nonatomic) UIWindow* window;
+@property(strong, nonatomic) ButterscotchAppCoordinator* coordinator;
 @end
 
 @implementation ButterscotchAppDelegate
@@ -851,13 +1155,12 @@ static const int32_t BS_KEY_ACTION_Y = 'V';
     (void) application;
     (void) launchOptions;
 
+    EnsureDataDirectoryAndHintFile();
+
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-
-    ButterscotchGameViewController* root = [ButterscotchGameViewController new];
-
-    self.window.rootViewController = root;
+    self.coordinator = [ButterscotchAppCoordinator new];
+    self.window.rootViewController = [self.coordinator buildRootController];
     [self.window makeKeyAndVisible];
-
     return YES;
 }
 

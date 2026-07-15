@@ -8,6 +8,7 @@
 
 NSString *ButterscotchDataDirectory(void);
 NSString *ButterscotchDataWinPath(void);
+NSString *ButterscotchPathFromDataDirectory(NSString *relativePath);
 NSString *ButterscotchInstructionsPath(void);
 NSString *ButterscotchRuntimeLogPath(void);
 

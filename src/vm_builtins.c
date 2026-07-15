@@ -7774,6 +7774,10 @@ static RValue builtin_joystick_axes(VMContext* ctx, RValue* args, MAYBE_UNUSED i
 STUB_RETURN_ZERO(window_get_fullscreen)
 STUB_RETURN_UNDEFINED(window_set_fullscreen)
 STUB_RETURN_UNDEFINED(window_enable_borderless_fullscreen)
+STUB_RETURN_TRUE(video_open)
+STUB_RETURN_UNDEFINED(video_enable_loop)
+STUB_RETURN_UNDEFINED(video_set_volume)
+STUB_RETURN_ZERO(video_get_format)
 static RValue builtin_window_get_width(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
     Runner* runner = ctx->runner;
     if (runner != nullptr && runner->getWindowSize != nullptr) {
@@ -16742,6 +16746,12 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "window_has_focus", builtin_window_has_focus);
     VM_registerBuiltin(ctx, "window_set_cursor", builtin_window_set_cursor);
     VM_registerBuiltin(ctx, "window_get_cursor", builtin_window_get_cursor);
+
+    // Video (stubbed on iOS host)
+    VM_registerBuiltin(ctx, "video_open", builtin_video_open);
+    VM_registerBuiltin(ctx, "video_enable_loop", builtin_video_enable_loop);
+    VM_registerBuiltin(ctx, "video_set_volume", builtin_video_set_volume);
+    VM_registerBuiltin(ctx, "video_get_format", builtin_video_get_format);
 
     // Game
     VM_registerBuiltin(ctx, "game_restart", builtin_game_restart);
