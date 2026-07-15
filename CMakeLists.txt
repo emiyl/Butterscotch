@@ -41,6 +41,8 @@ if(AUDIO_BACKEND STREQUAL "")
         set(AUDIO_BACKEND "web")
     elseif(PLATFORM STREQUAL "web-meta")
         set(AUDIO_BACKEND "none")
+    elseif(PLATFORM STREQUAL "ios")
+        set(AUDIO_BACKEND "miniaudio")
     elseif(PLATFORM STREQUAL "ps3")
         set(AUDIO_BACKEND "openal")
     elseif(PLATFORM STREQUAL "ps2")
@@ -104,6 +106,8 @@ file(GLOB PLATFORM_SOURCES src/${PLATFORM}/*.c)
 
 if(PLATFORM STREQUAL "android")
     add_library(butterscotch SHARED ${SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES})
+elseif(PLATFORM STREQUAL "ios")
+    add_library(butterscotch STATIC ${SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES})
 else()
     add_executable(butterscotch ${SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES})
 endif()
@@ -432,6 +436,139 @@ elseif(PLATFORM STREQUAL "android")
     # - GLESv3: OpenGL ES 3.0 functions
     # - OpenSLES: miniaudio's OpenSL ES backend (it dlopen's libaaudio.so at runtime when available, so no link-time aaudio dep)
     target_link_libraries(butterscotch PRIVATE log GLESv3 OpenSLES bzip2 stb_ds sha1 stb_vorbis)
+elseif(PLATFORM STREQUAL "ios")
+    enable_language(OBJC)
+
+    if (NOT ENABLE_MODERN_GL)
+        message(FATAL_ERROR "iOS requires modern gl!")
+    endif()
+    file(GLOB GL_SOURCES src/gl/*.c src/gl_common/*.c src/image/*.c)
+    target_sources(butterscotch PRIVATE ${GL_SOURCES})
+    target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/gl)
+    target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/gl_common)
+    target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/image)
+    add_compile_definitions(ENABLE_GLES PLATFORM_IOS)
+
+    # Butterscotch VM/interpreter profiler
+    option(ENABLE_VM_GML_PROFILER "Enable Butterscotch VM/interpreter profiler" ON)
+    if(ENABLE_VM_GML_PROFILER)
+        add_compile_definitions(ENABLE_VM_GML_PROFILER)
+    endif()
+
+    # Butterscotch VM/interpreter tracing
+    option(ENABLE_VM_TRACING "Enable Butterscotch VM/interpreter tracing checks" ON)
+    if(ENABLE_VM_TRACING)
+        add_compile_definitions(ENABLE_VM_TRACING)
+    endif()
+
+    # Butterscotch VM opcode count profiler
+    option(ENABLE_VM_OPCODE_PROFILER "Enable Butterscotch VM opcode count profiler" OFF)
+    if(ENABLE_VM_OPCODE_PROFILER)
+        add_compile_definitions(ENABLE_VM_OPCODE_PROFILER)
+    endif()
+
+    # Spatial grid logs
+    option(ENABLE_SPATIAL_GRID_LOGS "Enable Spatial Grid logs" OFF)
+    if(ENABLE_SPATIAL_GRID_LOGS)
+        add_compile_definitions(ENABLE_SPATIAL_GRID_LOGS)
+    endif()
+
+    # VM unknown/stubbed function logs
+    option(ENABLE_VM_STUB_LOGS "Enable VM unknown/stubbed function logs" ON)
+    if(ENABLE_VM_STUB_LOGS)
+        add_compile_definitions(ENABLE_VM_STUB_LOGS)
+    endif()
+
+    # stb_image
+    target_include_directories(butterscotch PUBLIC vendor/stb/image)
+    # stb_vorbis (for miniaudio's OGG decoding)
+    target_include_directories(butterscotch PUBLIC vendor/stb/vorbis)
+
+    # Framework dependencies for iOS hosts that link this static library.
+    target_link_libraries(butterscotch PUBLIC bzip2 stb_ds sha1 stb_vorbis)
+
+    set(BUTTERSCOTCH_IOS_LINK_ITEMS)
+    find_library(BS_FOUNDATION_FRAMEWORK Foundation REQUIRED)
+    find_library(BS_GAMECONTROLLER_FRAMEWORK GameController REQUIRED)
+    find_library(BS_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+    find_library(BS_GLKIT_FRAMEWORK GLKit REQUIRED)
+    find_library(BS_OPENGLES_FRAMEWORK OpenGLES REQUIRED)
+    find_library(BS_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+    find_library(BS_UIKIT_FRAMEWORK UIKit REQUIRED)
+    list(APPEND BUTTERSCOTCH_IOS_LINK_ITEMS
+        ${BS_FOUNDATION_FRAMEWORK}
+        ${BS_GAMECONTROLLER_FRAMEWORK}
+        ${BS_COREGRAPHICS_FRAMEWORK}
+        ${BS_GLKIT_FRAMEWORK}
+        ${BS_OPENGLES_FRAMEWORK}
+        ${BS_QUARTZCORE_FRAMEWORK}
+        ${BS_UIKIT_FRAMEWORK}
+    )
+    if(AUDIO_BACKEND STREQUAL "miniaudio")
+        set_source_files_properties(src/audio/miniaudio/ma_audio_system.c PROPERTIES LANGUAGE OBJC)
+        find_library(BS_AUDIOTOOLBOX_FRAMEWORK AudioToolbox REQUIRED)
+        find_library(BS_COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
+        find_library(BS_AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
+        list(APPEND BUTTERSCOTCH_IOS_LINK_ITEMS
+            ${BS_AUDIOTOOLBOX_FRAMEWORK}
+            ${BS_COREAUDIO_FRAMEWORK}
+            ${BS_AVFOUNDATION_FRAMEWORK}
+        )
+    endif()
+
+    # Optional ANGLE-like frameworks shipped in this repository (OpenGL-over-Metal shim).
+    if(EXISTS "${CMAKE_SOURCE_DIR}/OpenGL/libEGL.framework/libEGL" AND EXISTS "${CMAKE_SOURCE_DIR}/OpenGL/libGLESv2.framework/libGLESv2")
+        list(APPEND BUTTERSCOTCH_IOS_LINK_ITEMS
+            "${CMAKE_SOURCE_DIR}/OpenGL/libEGL.framework/libEGL"
+            "${CMAKE_SOURCE_DIR}/OpenGL/libGLESv2.framework/libGLESv2"
+        )
+    endif()
+
+    target_link_libraries(butterscotch PUBLIC ${BUTTERSCOTCH_IOS_LINK_ITEMS})
+
+    option(BUTTERSCOTCH_IOS_BUILD_APP "Build a minimal iOS app bundle target" ON)
+    if(BUTTERSCOTCH_IOS_BUILD_APP)
+        add_executable(butterscotch-ios-app MACOSX_BUNDLE src/ios/ipa_main.m)
+        target_link_libraries(butterscotch-ios-app PRIVATE butterscotch)
+        target_include_directories(butterscotch-ios-app PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+        set_target_properties(butterscotch-ios-app PROPERTIES
+            OUTPUT_NAME "Butterscotch"
+            MACOSX_BUNDLE_BUNDLE_NAME "Butterscotch"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "com.butterscotch.runner"
+            MACOSX_BUNDLE_BUNDLE_VERSION "1"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
+            XCODE_ATTRIBUTE_INFOPLIST_KEY_UIFileSharingEnabled "YES"
+            XCODE_ATTRIBUTE_INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace "YES"
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+            XCODE_ATTRIBUTE_INFOPLIST_KEY_UISupportedInterfaceOrientations "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+            XCODE_ATTRIBUTE_INFOPLIST_KEY_UIRequiresFullScreen "YES"
+            XCODE_ATTRIBUTE_ENABLE_BITCODE "NO"
+            XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+            XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/Frameworks"
+            XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "YES"
+            XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO"
+            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+        )
+
+        if(EXISTS "${CMAKE_SOURCE_DIR}/OpenGL/libEGL.framework/libEGL" AND EXISTS "${CMAKE_SOURCE_DIR}/OpenGL/libGLESv2.framework/libGLESv2")
+            add_custom_command(TARGET butterscotch-ios-app POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:butterscotch-ios-app>/Frameworks"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/OpenGL/libEGL.framework" "$<TARGET_BUNDLE_DIR:butterscotch-ios-app>/Frameworks/libEGL.framework"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/OpenGL/libGLESv2.framework" "$<TARGET_BUNDLE_DIR:butterscotch-ios-app>/Frameworks/libGLESv2.framework"
+            )
+        endif()
+
+        add_custom_target(butterscotch-ipa
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/ipa/$<CONFIG>"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/ipa/$<CONFIG>/Payload"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/ipa/$<CONFIG>/Payload"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:butterscotch-ios-app>" "${CMAKE_BINARY_DIR}/ipa/$<CONFIG>/Payload/Butterscotch.app"
+            COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_BINARY_DIR}/ipa/$<CONFIG>" ${CMAKE_COMMAND} -E tar "cf" "Butterscotch-unsigned.ipa" --format=zip "Payload"
+            DEPENDS butterscotch-ios-app
+            COMMENT "Packaging unsigned IPA at ${CMAKE_BINARY_DIR}/ipa/$<CONFIG>/Butterscotch-unsigned.ipa"
+        )
+    endif()
 elseif(PLATFORM STREQUAL "ps2")
     file(GLOB DEBUG_FONT_SOURCES src/debug_font/*.c)
     target_sources(butterscotch PRIVATE ${DEBUG_FONT_SOURCES})

@@ -33,6 +33,47 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       }
+    },
+    {
+      "name": "iOS-Release",
+      "generator": "Xcode",
+      "binaryDir": "${sourceDir}/build-ios",
+      "cacheVariables": {
+        "PLATFORM": "ios",
+        "AUDIO_BACKEND": "miniaudio",
+        "ENABLE_LEGACY_GL": false,
+        "ENABLE_MODERN_GL": true,
+        "CMAKE_SYSTEM_NAME": "iOS",
+        "CMAKE_OSX_SYSROOT": "iphoneos",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET": "14.0"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "iOS-Release-Lib",
+      "configurePreset": "iOS-Release",
+      "configuration": "Release",
+      "targets": [
+        "butterscotch"
+      ]
+    },
+    {
+      "name": "iOS-Release-App",
+      "configurePreset": "iOS-Release",
+      "configuration": "Release",
+      "targets": [
+        "butterscotch-ios-app"
+      ]
+    },
+    {
+      "name": "iOS-Release-IPA",
+      "configurePreset": "iOS-Release",
+      "configuration": "Release",
+      "targets": [
+        "butterscotch-ipa"
+      ]
     }
   ]
 }

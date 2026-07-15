@@ -59,6 +59,7 @@ Of course, there are exceptions that break game compatibility altogether:
 
 * Windows
 * Web
+* iOS (experimental)
 * PlayStation 2
 * PlayStation 3
 * ...and maybe more in the future!
@@ -97,6 +98,33 @@ make
 If you are using CLion, set the platform in `Settings` > `Build, Execution, Deployment` > `CMake` and add `-DDESKTOP_BACKEND=glfw3`
 
 Then run Butterscotch with `./butterscotch /path/to/data.win`!
+
+### iOS (experimental)
+
+This repository now includes an `ios` CMake platform target that builds Butterscotch as a static library plus a small C host API (`src/ios/butterscotch_ios.h`).
+
+Configure and build using the preset:
+
+```bash
+cmake --preset iOS-Release
+cmake --build build-ios --config Release
+cmake --build build-ios --config Release --target butterscotch-ipa
+# or, equivalently:
+cmake --build --preset iOS-Release-IPA
+```
+
+The generated IPA will be at `build-ios/ipa/Release/Butterscotch-unsigned.ipa`.
+
+Notes:
+
+* The target links to the optional `OpenGL/libEGL.framework` and `OpenGL/libGLESv2.framework` shims (when present) so iOS hosts can route OpenGL ES calls through your OpenGL-to-Metal layer.
+* The `iOS-Release` preset currently uses `AUDIO_BACKEND=none` (silent audio) for maximum portability in pure C builds.
+* On first launch, the app creates `Documents/Butterscotch` and shows in-app instructions to place `data.win` there.
+* If `Documents/Butterscotch/data.win` exists, the app now starts the runner automatically and renders the game.
+* With iOS file sharing enabled, this folder appears in Files/Finder under Butterscotch so users can copy `data.win` without rebuilding.
+* The bundled iOS host app now creates and owns an OpenGL ES context and drives the frame loop through `src/ios/butterscotch_ios.h`.
+* `data.win` and save directories must be passed as absolute paths that are readable/writable inside the app sandbox.
+* `butterscotch-ipa` currently creates an unsigned IPA (suitable as a CI artifact or for later re-signing).
 
 ## CLI parameters
 

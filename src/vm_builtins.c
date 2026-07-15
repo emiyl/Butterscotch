@@ -7773,6 +7773,7 @@ static RValue builtin_joystick_axes(VMContext* ctx, RValue* args, MAYBE_UNUSED i
 // Window stubs
 STUB_RETURN_ZERO(window_get_fullscreen)
 STUB_RETURN_UNDEFINED(window_set_fullscreen)
+STUB_RETURN_UNDEFINED(window_enable_borderless_fullscreen)
 static RValue builtin_window_get_width(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
     Runner* runner = ctx->runner;
     if (runner != nullptr && runner->getWindowSize != nullptr) {
@@ -11097,6 +11098,51 @@ static RValue builtin_color_get_value(MAYBE_UNUSED VMContext* ctx, RValue* args,
 // Display stubs
 STUB_RETURN_VALUE(display_get_width, 640.0)
 STUB_RETURN_VALUE(display_get_height, 480.0)
+
+// Compatibility stubs for projects that initialize optional 3D vertex formats.
+// These return stable IDs so script-side handles remain valid.
+static int32_t gStubNextVertexBufferId = 1;
+static int32_t gStubNextVertexFormatId = 1;
+
+static RValue builtin_vertex_create_buffer(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "vertex_create_buffer");
+    return RValue_makeReal((GMLReal) gStubNextVertexBufferId++);
+}
+
+static RValue builtin_vertex_format_begin(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "vertex_format_begin");
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_vertex_format_add_position_3d(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "vertex_format_add_position_3d");
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_vertex_format_add_normal(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "vertex_format_add_normal");
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_vertex_format_add_colour(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "vertex_format_add_colour");
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_vertex_format_add_textcoord(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "vertex_format_add_textcoord");
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_vertex_format_end(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "vertex_format_end");
+    return RValue_makeReal((GMLReal) gStubNextVertexFormatId++);
+}
+
+static RValue builtin_texturegroup_get_textures(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "texturegroup_get_textures");
+    return RValue_makeReal((GMLReal) dsListCreate(ctx->runner));
+}
 
 static int32_t resolveGuiWidth(Runner* runner) {
     if (runner->guiWidth > 0) return runner->guiWidth;
@@ -16692,6 +16738,7 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "window_get_height", builtin_window_get_height);
     VM_registerBuiltin(ctx, "window_set_size", builtin_window_set_size);
     VM_registerBuiltin(ctx, "window_center", builtin_window_center);
+    VM_registerBuiltin(ctx, "window_enable_borderless_fullscreen", builtin_window_enable_borderless_fullscreen);
     VM_registerBuiltin(ctx, "window_has_focus", builtin_window_has_focus);
     VM_registerBuiltin(ctx, "window_set_cursor", builtin_window_set_cursor);
     VM_registerBuiltin(ctx, "window_get_cursor", builtin_window_get_cursor);
@@ -16872,6 +16919,13 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "draw_get_font", builtin_draw_get_font);
     VM_registerBuiltin(ctx, "draw_get_halign", builtin_draw_get_halign);
     VM_registerBuiltin(ctx, "draw_get_valign", builtin_draw_get_valign);
+    VM_registerBuiltin(ctx, "vertex_create_buffer", builtin_vertex_create_buffer);
+    VM_registerBuiltin(ctx, "vertex_format_begin", builtin_vertex_format_begin);
+    VM_registerBuiltin(ctx, "vertex_format_add_position_3d", builtin_vertex_format_add_position_3d);
+    VM_registerBuiltin(ctx, "vertex_format_add_normal", builtin_vertex_format_add_normal);
+    VM_registerBuiltin(ctx, "vertex_format_add_colour", builtin_vertex_format_add_colour);
+    VM_registerBuiltin(ctx, "vertex_format_add_textcoord", builtin_vertex_format_add_textcoord);
+    VM_registerBuiltin(ctx, "vertex_format_end", builtin_vertex_format_end);
 
 
     // Motion
@@ -16945,6 +16999,7 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "display_set_gui_size", builtin_display_set_gui_size);
     VM_registerBuiltin(ctx, "display_set_gui_maximise", builtin_display_set_gui_maximise);
     VM_registerBuiltin(ctx, "display_set_gui_maximize", builtin_display_set_gui_maximise);
+    VM_registerBuiltin(ctx, "texturegroup_get_textures", builtin_texturegroup_get_textures);
 
     // Devices
     VM_registerBuiltin(ctx, "device_mouse_check_button", builtinDeviceMouseCheckButton);

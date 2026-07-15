@@ -1,0 +1,26 @@
+[host] data folder: /var/mobile/Containers/Data/Application/ABA25A4B-0ECE-4F5C-9B91-21B6CF248798/Documents/Data/Application/3C70356C-ABB0-498B-B9C2-6EE3E4338AAE/Documents/Butterscotch
+[host] runtime log: /var/mobile/Containers/Data/Application/ABA25A4B-0ECE-4F5C-9B91-21B6CF248798/Documents/Data/Application/3C70356C-ABB0-498B-B9C2-6EE3E4338AAE/Documents/Butterscotch/runtime.log
+[host] attempting runner start with /var/mobile/Containers/Data/Application/ABA25A4B-0ECE-4F5C-9B91-21B6CF248798/Documents/Data/Application/3C70356C-ABB0-498B-B9C2-6EE3E4338AAE/Documents/Butterscotch/data.win
+[gl] startup framebuffer binding: 1
+[stderr] VM: Initialized with 1985 functions mapped
+[stderr] OpenGL version: OpenGL ES 3.0 Metal - 104
+[stderr] GL: Compiling default vertex shader
+[stderr] GL: Compiling default fragment shader
+[stderr] GL: Shader default succesfully linked!
+[stderr] GL: 0 Shaders Found
+[stderr] GL: Renderer initialized (9 texture pages)
+[stderr] VM: [gml_Script___init_d3d] Stubbed function "vertex_create_buffer"!
+[stderr] VM: [gml_Script___init_d3d] Stubbed function "vertex_format_begin"!
+[stderr] VM: [gml_Script___init_d3d] Stubbed function "vertex_format_add_position_3d"!
+[stderr] VM: [gml_Script___init_d3d] Stubbed function "vertex_format_add_normal"!
+[stderr] VM: [gml_Script___init_d3d] Stubbed function "vertex_format_add_colour"!
+[stderr] VM: [gml_Script___init_d3d] Stubbed function "vertex_format_add_textcoord"!
+[stderr] VM: [gml_Script___init_d3d] Stubbed function "vertex_format_end"!
+[stderr] VM: [gml_Object_obj_initializer2_Create_0] Stubbed function "window_enable_borderless_fullscreen"!
+[stderr] VM: [gml_Script_scr_prefetch_textures] Stubbed function "texturegroup_get_textures"!
+[stderr] VM: [gml_Object_obj_time_Create_0] Stubbed function "display_get_height"!
+[stderr] VM: [gml_Object_obj_time_Create_0] Stubbed function "display_get_width"!
+[stderr] Runner: Room loaded: ROOM_INITIALIZE (room 0) with 7 instances
+[stderr] ... 310 noisy lines hidden
+[host] runner started
+[host] target fps: 30
