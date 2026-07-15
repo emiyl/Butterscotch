@@ -744,7 +744,14 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
 
     [EAGLContext setCurrentContext:self.glContext];
 
-    NSString* savesPath = ButterscotchPathFromDataDirectory([NSString stringWithFormat:@"saves/%@", self.launchKey]);
+    NSString* savesSubdir = self.launchKey;
+    // if launch key has pattern "dr_ch\d" then use "deltarune" as saves subdir instead of the full key
+    NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:@"^dr_ch\\d" options:0 error:nil];
+    if ([regex numberOfMatchesInString:savesSubdir options:0 range:NSMakeRange(0, savesSubdir.length)] > 0) {
+        savesSubdir = @"deltarune";
+    }
+    
+    NSString* savesPath = ButterscotchPathFromDataDirectory([NSString stringWithFormat:@"saves/%@", savesSubdir]);
     NSError* error = nil;
     [[NSFileManager defaultManager] createDirectoryAtPath:savesPath withIntermediateDirectories:YES attributes:nil error:&error];
     if (error != nil) {
