@@ -93,17 +93,10 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
     self.nintendoSwapSwitch.on = BSLoadNintendoSwap();
     [self.nintendoSwapSwitch addTarget:self action:@selector(onSwapChanged:) forControlEvents:UIControlEventValueChanged];
 
-    UILabel* noteLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    noteLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    noteLabel.numberOfLines = 0;
-    noteLabel.textColor = [UIColor secondaryLabelColor];
-    noteLabel.text = @"Settings are saved on-device and applied to future game sessions.";
-
     [self.view addSubview:speedLabel];
     [self.view addSubview:self.speedControl];
     [self.view addSubview:swapLabel];
     [self.view addSubview:self.nintendoSwapSwitch];
-    [self.view addSubview:noteLabel];
 
     UILayoutGuide* safe = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
@@ -119,10 +112,6 @@ static NSArray<NSDictionary<NSString*, NSString*>*>* BSLaunchCatalog(void) {
 
         [self.nintendoSwapSwitch.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-20.0],
         [self.nintendoSwapSwitch.centerYAnchor constraintEqualToAnchor:swapLabel.centerYAnchor],
-
-        [noteLabel.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:20.0],
-        [noteLabel.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-20.0],
-        [noteLabel.topAnchor constraintEqualToAnchor:swapLabel.bottomAnchor constant:20.0],
     ]];
 }
 
