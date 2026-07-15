@@ -7552,8 +7552,24 @@ static RValue builtin_keyboard_check_released(VMContext* ctx, RValue* args, int3
 }
 
 static RValue builtin_keyboard_check_direct(VMContext* ctx, RValue* args, int32_t argCount) {
-    // keyboard_check_direct is the same as keyboard_check for our purposes
-    return builtin_keyboard_check(ctx, args, argCount);
+    if (1 > argCount) return RValue_makeBool(false);
+    Runner* runner = ctx->runner;
+    int32_t key = RValue_toInt32(args[0]);
+    return RValue_makeBool(RunnerKeyboard_checkDirect(runner->keyboard, key));
+}
+
+static RValue builtin_keyboard_check_pressed_direct(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (1 > argCount) return RValue_makeBool(false);
+    Runner* runner = ctx->runner;
+    int32_t key = RValue_toInt32(args[0]);
+    return RValue_makeBool(RunnerKeyboard_checkDirectPressed(runner->keyboard, key));
+}
+
+static RValue builtin_keyboard_check_released_direct(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (1 > argCount) return RValue_makeBool(false);
+    Runner* runner = ctx->runner;
+    int32_t key = RValue_toInt32(args[0]);
+    return RValue_makeBool(RunnerKeyboard_checkDirectReleased(runner->keyboard, key));
 }
 
 static RValue builtin_keyboard_key_press(VMContext* ctx, RValue* args, int32_t argCount) {
@@ -7809,6 +7825,54 @@ static RValue builtin_video_open(VMContext* ctx, RValue* args, int32_t argCount)
 #else
     logStubbedFunction(ctx, "video_open");
     return RValue_makeBool(true);
+#endif
+}
+
+static RValue builtin_video_close(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+#if defined(PLATFORM_IOS)
+    ButterscotchIOS_videoClose();
+    return RValue_makeUndefined();
+#else
+    logStubbedFunction(ctx, "video_close");
+    return RValue_makeUndefined();
+#endif
+}
+
+static RValue builtin_video_is_open(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+#if defined(PLATFORM_IOS)
+    return RValue_makeBool(ButterscotchIOS_videoIsOpen());
+#else
+    logStubbedFunction(ctx, "video_is_open");
+    return RValue_makeBool(false);
+#endif
+}
+
+static RValue builtin_video_is_playing(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+#if defined(PLATFORM_IOS)
+    return RValue_makeBool(ButterscotchIOS_videoIsPlaying());
+#else
+    logStubbedFunction(ctx, "video_is_playing");
+    return RValue_makeBool(false);
+#endif
+}
+
+static RValue builtin_video_pause(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+#if defined(PLATFORM_IOS)
+    ButterscotchIOS_videoPause();
+    return RValue_makeUndefined();
+#else
+    logStubbedFunction(ctx, "video_pause");
+    return RValue_makeUndefined();
+#endif
+}
+
+static RValue builtin_video_resume(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+#if defined(PLATFORM_IOS)
+    ButterscotchIOS_videoResume();
+    return RValue_makeUndefined();
+#else
+    logStubbedFunction(ctx, "video_resume");
+    return RValue_makeUndefined();
 #endif
 }
 
@@ -16777,6 +16841,8 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "keyboard_check_pressed", builtin_keyboard_check_pressed);
     VM_registerBuiltin(ctx, "keyboard_check_released", builtin_keyboard_check_released);
     VM_registerBuiltin(ctx, "keyboard_check_direct", builtin_keyboard_check_direct);
+    VM_registerBuiltin(ctx, "keyboard_check_pressed_direct", builtin_keyboard_check_pressed_direct);
+    VM_registerBuiltin(ctx, "keyboard_check_released_direct", builtin_keyboard_check_released_direct);
     VM_registerBuiltin(ctx, "keyboard_key_press", builtin_keyboard_key_press);
     VM_registerBuiltin(ctx, "keyboard_key_release", builtin_keyboard_key_release);
     VM_registerBuiltin(ctx, "keyboard_clear", builtin_keyboard_clear);
@@ -16822,6 +16888,11 @@ void VMBuiltins_registerAll(VMContext* ctx) {
 
     // Video (stubbed on iOS host)
     VM_registerBuiltin(ctx, "video_open", builtin_video_open);
+    VM_registerBuiltin(ctx, "video_close", builtin_video_close);
+    VM_registerBuiltin(ctx, "video_is_open", builtin_video_is_open);
+    VM_registerBuiltin(ctx, "video_is_playing", builtin_video_is_playing);
+    VM_registerBuiltin(ctx, "video_pause", builtin_video_pause);
+    VM_registerBuiltin(ctx, "video_resume", builtin_video_resume);
     VM_registerBuiltin(ctx, "video_enable_loop", builtin_video_enable_loop);
     VM_registerBuiltin(ctx, "video_set_volume", builtin_video_set_volume);
     VM_registerBuiltin(ctx, "video_get_format", builtin_video_get_format);

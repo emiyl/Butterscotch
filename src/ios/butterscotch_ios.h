@@ -53,6 +53,11 @@ void ButterscotchIOS_suspendAudio(void);
 void ButterscotchIOS_resumeAudio(void);
 
 bool ButterscotchIOS_videoOpen(const char *absolutePath);
+void ButterscotchIOS_videoClose(void);
+bool ButterscotchIOS_videoIsOpen(void);
+bool ButterscotchIOS_videoIsPlaying(void);
+void ButterscotchIOS_videoPause(void);
+void ButterscotchIOS_videoResume(void);
 void ButterscotchIOS_videoEnableLoop(bool enabled);
 void ButterscotchIOS_videoSetVolume(float volume);
 int32_t ButterscotchIOS_videoGetFormat(void);

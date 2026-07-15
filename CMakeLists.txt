@@ -493,6 +493,7 @@ elseif(PLATFORM STREQUAL "ios")
     find_library(BS_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
     find_library(BS_GLKIT_FRAMEWORK GLKit REQUIRED)
     find_library(BS_OPENGLES_FRAMEWORK OpenGLES REQUIRED)
+    find_library(BS_COREMEDIA_FRAMEWORK CoreMedia REQUIRED)
     find_library(BS_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
     find_library(BS_UIKIT_FRAMEWORK UIKit REQUIRED)
     list(APPEND BUTTERSCOTCH_IOS_LINK_ITEMS
@@ -501,6 +502,7 @@ elseif(PLATFORM STREQUAL "ios")
         ${BS_COREGRAPHICS_FRAMEWORK}
         ${BS_GLKIT_FRAMEWORK}
         ${BS_OPENGLES_FRAMEWORK}
+        ${BS_COREMEDIA_FRAMEWORK}
         ${BS_QUARTZCORE_FRAMEWORK}
         ${BS_UIKIT_FRAMEWORK}
     )
@@ -530,9 +532,12 @@ elseif(PLATFORM STREQUAL "ios")
     if(BUTTERSCOTCH_IOS_BUILD_APP)
         add_executable(butterscotch-ios-app MACOSX_BUNDLE
             src/ios/ipa_main.m
+            src/ios/ipa_game_view_controller.m
+            src/ios/ipa_coordinator.m
+            src/ios/ipa_app_delegate.m
             src/ios/ipa_support.m
         )
-        target_link_libraries(butterscotch-ios-app PRIVATE butterscotch)
+        target_link_libraries(butterscotch-ios-app PRIVATE butterscotch ${BS_COREMEDIA_FRAMEWORK})
         target_include_directories(butterscotch-ios-app PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
         set_target_properties(butterscotch-ios-app PROPERTIES

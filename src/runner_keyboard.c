@@ -33,9 +33,15 @@ void RunnerKeyboard_free(RunnerKeyboardState* kb) {
 void RunnerKeyboard_beginFrame(RunnerKeyboardState* kb) {
     memset(kb->keyPressed, 0, sizeof(kb->keyPressed));
     memset(kb->keyReleased, 0, sizeof(kb->keyReleased));
+    memset(kb->rawKeyPressed, 0, sizeof(kb->rawKeyPressed));
+    memset(kb->rawKeyReleased, 0, sizeof(kb->rawKeyReleased));
 }
 
 void RunnerKeyboard_onKeyDown(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
+    if (isValidKey(gmlKeyCode)) {
+        kb->rawKeyDown[gmlKeyCode] = true;
+        kb->rawKeyPressed[gmlKeyCode] = true;
+    }
     gmlKeyCode = mapKey(kb, gmlKeyCode);
     if (!isValidKey(gmlKeyCode)) return;
     kb->keyDown[gmlKeyCode] = true;
@@ -44,6 +50,10 @@ void RunnerKeyboard_onKeyDown(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
 }
 
 void RunnerKeyboard_onKeyUp(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
+    if (isValidKey(gmlKeyCode)) {
+        kb->rawKeyDown[gmlKeyCode] = false;
+        kb->rawKeyReleased[gmlKeyCode] = true;
+    }
     gmlKeyCode = mapKey(kb, gmlKeyCode);
     if (!isValidKey(gmlKeyCode)) return;
     kb->keyDown[gmlKeyCode] = false;
@@ -108,10 +118,45 @@ bool RunnerKeyboard_checkReleased(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
     return kb->keyReleased[gmlKeyCode];
 }
 
+bool RunnerKeyboard_checkDirect(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
+    if (gmlKeyCode == VK_ANYKEY) {
+        return checkIfAnyKey(kb->rawKeyDown);
+    }
+    if (gmlKeyCode == VK_NOKEY) {
+        return !checkIfAnyKey(kb->rawKeyDown);
+    }
+    if (!isValidKey(gmlKeyCode)) return false;
+    return kb->rawKeyDown[gmlKeyCode];
+}
+
+bool RunnerKeyboard_checkDirectPressed(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
+    if (gmlKeyCode == VK_ANYKEY) {
+        return checkIfAnyKey(kb->rawKeyPressed);
+    }
+    if (gmlKeyCode == VK_NOKEY) {
+        return !checkIfAnyKey(kb->rawKeyPressed);
+    }
+    if (!isValidKey(gmlKeyCode)) return false;
+    return kb->rawKeyPressed[gmlKeyCode];
+}
+
+bool RunnerKeyboard_checkDirectReleased(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
+    if (gmlKeyCode == VK_ANYKEY) {
+        return checkIfAnyKey(kb->rawKeyReleased);
+    }
+    if (gmlKeyCode == VK_NOKEY) {
+        return !checkIfAnyKey(kb->rawKeyReleased);
+    }
+    if (!isValidKey(gmlKeyCode)) return false;
+    return kb->rawKeyReleased[gmlKeyCode];
+}
+
 void RunnerKeyboard_simulatePress(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
     if (!isValidKey(gmlKeyCode)) return;
     kb->keyDown[gmlKeyCode] = true;
     kb->keyPressed[gmlKeyCode] = true;
+    kb->rawKeyDown[gmlKeyCode] = true;
+    kb->rawKeyPressed[gmlKeyCode] = true;
     kb->lastKey = gmlKeyCode;
 }
 
@@ -119,6 +164,8 @@ void RunnerKeyboard_simulateRelease(RunnerKeyboardState* kb, int32_t gmlKeyCode)
     if (!isValidKey(gmlKeyCode)) return;
     kb->keyDown[gmlKeyCode] = false;
     kb->keyReleased[gmlKeyCode] = true;
+    kb->rawKeyDown[gmlKeyCode] = false;
+    kb->rawKeyReleased[gmlKeyCode] = true;
 }
 
 void RunnerKeyboard_clear(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
@@ -126,6 +173,9 @@ void RunnerKeyboard_clear(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
         memset(kb->keyDown, 0, sizeof(kb->keyDown));
         memset(kb->keyPressed, 0, sizeof(kb->keyPressed));
         memset(kb->keyReleased, 0, sizeof(kb->keyReleased));
+        memset(kb->rawKeyDown, 0, sizeof(kb->rawKeyDown));
+        memset(kb->rawKeyPressed, 0, sizeof(kb->rawKeyPressed));
+        memset(kb->rawKeyReleased, 0, sizeof(kb->rawKeyReleased));
         kb->lastKey = VK_NOKEY;
         return;
     }
@@ -133,6 +183,9 @@ void RunnerKeyboard_clear(RunnerKeyboardState* kb, int32_t gmlKeyCode) {
     kb->keyDown[gmlKeyCode] = false;
     kb->keyPressed[gmlKeyCode] = false;
     kb->keyReleased[gmlKeyCode] = false;
+    kb->rawKeyDown[gmlKeyCode] = false;
+    kb->rawKeyPressed[gmlKeyCode] = false;
+    kb->rawKeyReleased[gmlKeyCode] = false;
 }
 
 void RunnerKeyboard_setMap(RunnerKeyboardState* kb, int32_t fromKey, int32_t toKey) {
