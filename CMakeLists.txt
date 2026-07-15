@@ -528,7 +528,10 @@ elseif(PLATFORM STREQUAL "ios")
 
     option(BUTTERSCOTCH_IOS_BUILD_APP "Build a minimal iOS app bundle target" ON)
     if(BUTTERSCOTCH_IOS_BUILD_APP)
-        add_executable(butterscotch-ios-app MACOSX_BUNDLE src/ios/ipa_main.m)
+        add_executable(butterscotch-ios-app MACOSX_BUNDLE
+            src/ios/ipa_main.m
+            src/ios/ipa_support.m
+        )
         target_link_libraries(butterscotch-ios-app PRIVATE butterscotch)
         target_include_directories(butterscotch-ios-app PRIVATE ${CMAKE_SOURCE_DIR}/src)
 

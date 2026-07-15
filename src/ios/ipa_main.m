@@ -4,107 +4,20 @@
 #import <GameController/GameController.h>
 #import <OpenGLES/ES3/gl.h>
 
-#include <ctype.h>
-#include <fcntl.h>
-#include <unistd.h>
-
 #include "ios/butterscotch_ios.h"
+#include "ios/ipa_support.h"
 #include "runner_keyboard.h"
 
 static const uint8_t BS_KEY_SOURCE_TOUCH = 1;
 static const uint8_t BS_KEY_SOURCE_CONTROLLER = 2;
+static const NSTimeInterval BS_MENU_AUTO_HIDE_SECONDS = 3.0;
 
 static const int32_t BS_KEY_ACTION_A = 'Z';
 static const int32_t BS_KEY_ACTION_B = 'X';
 static const int32_t BS_KEY_ACTION_X = 'C';
 static const int32_t BS_KEY_ACTION_Y = 'V';
 
-@interface ButterscotchPassthroughView : UIView
-@end
-
-@implementation ButterscotchPassthroughView
-- (UIView*)hitTest:(CGPoint)point withEvent:(UIEvent*)event {
-    UIView* hit = [super hitTest:point withEvent:event];
-    return hit == self ? nil : hit;
-}
-@end
-
-static NSString* ButterscotchDataDirectory(void) {
-    NSString* documentsDir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    return [documentsDir stringByAppendingPathComponent:@"Butterscotch"];
-}
-
-static NSString* ButterscotchDataWinPath(void) {
-    return [ButterscotchDataDirectory() stringByAppendingPathComponent:@"data.win"];
-}
-
-static NSString* ButterscotchInstructionsPath(void) {
-    return [ButterscotchDataDirectory() stringByAppendingPathComponent:@"PLACE_DATA_WIN_HERE.txt"];
-}
-
-static NSString* ButterscotchRuntimeLogPath(void) {
-    return [ButterscotchDataDirectory() stringByAppendingPathComponent:@"runtime.log"];
-}
-
-static BOOL ShouldDisplayRuntimeLogLine(NSString* line) {
-    if (line == nil || line.length == 0) {
-        return NO;
-    }
-
-    // Hide high-volume noise so errors and GL diagnostics stay visible.
-    if ([line hasPrefix:@"Runner: Executing global init script:"]) {
-        return NO;
-    }
-    if ([line hasPrefix:@"VM: Reset complete"]) {
-        return NO;
-    }
-
-    return YES;
-}
-
-static void RedirectStderrToRuntimeLog(void) {
-    static BOOL redirected = NO;
-    if (redirected) {
-        return;
-    }
-
-    NSString* path = ButterscotchRuntimeLogPath();
-    int fd = open(path.UTF8String, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd < 0) {
-        return;
-    }
-
-    if (dup2(fd, STDERR_FILENO) == 0) {
-        setvbuf(stderr, NULL, _IONBF, 0);
-        redirected = YES;
-    }
-    close(fd);
-}
-
-static void EnsureDataDirectoryAndHintFile(void) {
-    NSFileManager* fileManager = [NSFileManager defaultManager];
-    NSString* dirPath = ButterscotchDataDirectory();
-    NSError* error = nil;
-
-    if (![fileManager fileExistsAtPath:dirPath]) {
-        [fileManager createDirectoryAtPath:dirPath withIntermediateDirectories:YES attributes:nil error:&error];
-        if (error != nil) {
-            NSLog(@"Could not create data directory %@: %@", dirPath, error);
-            error = nil;
-        }
-    }
-
-    NSString* hintPath = ButterscotchInstructionsPath();
-    if (![fileManager fileExistsAtPath:hintPath]) {
-        NSString* hint = @"Place your GameMaker data.win file in this folder and relaunch Butterscotch.\nExpected filename: data.win\n";
-        [hint writeToFile:hintPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
-        if (error != nil) {
-            NSLog(@"Could not write hint file %@: %@", hintPath, error);
-        }
-    }
-}
-
-@interface ButterscotchGameViewController : GLKViewController <UITextFieldDelegate>
+@interface ButterscotchGameViewController : GLKViewController
 @property(strong, nonatomic) UILabel* statusLabel;
 @property(strong, nonatomic) UIButton* menuButton;
 @property(strong, nonatomic) UITextView* debugTextView;
@@ -112,19 +25,22 @@ static void EnsureDataDirectoryAndHintFile(void) {
 @property(strong, nonatomic) GLKView* gameView;
 @property(strong, nonatomic) EAGLContext* glContext;
 @property(strong, nonatomic) CADisplayLink* displayLink;
-@property(strong, nonatomic) UITextField* keyboardField;
 @property(strong, nonatomic) NSMutableArray<NSString*>* debugLines;
 @property(assign, nonatomic) BOOL runnerStarted;
-@property(assign, nonatomic) CFTimeInterval previousTimestamp;
 @property(assign, nonatomic) BOOL mouseDown;
 @property(assign, nonatomic) BOOL logVisible;
-@property(assign, nonatomic) BOOL keyboardVisible;
+@property(assign, nonatomic) BOOL controlsVisible;
 @property(assign, nonatomic) BOOL sawNoPresentResult;
 @property(assign, nonatomic) BOOL sawFirstDrawCallback;
 @property(assign, nonatomic) uint64_t hostFrameCounter;
 @property(assign, nonatomic) uint64_t displayLinkTickCounter;
 @property(assign, nonatomic) unsigned long long runtimeLogOffset;
+@property(assign, nonatomic) float fixedStepDeltaSeconds;
+@property(assign, nonatomic) float accumulatedDisplaySeconds;
+@property(assign, nonatomic) float pendingFrameDeltaSeconds;
+@property(assign, nonatomic) CFTimeInterval lastDisplayLinkTimestamp;
 @property(assign, nonatomic) BOOL preferNintendoFaceSwap;
+@property(strong, nonatomic) NSTimer* menuAutoHideTimer;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewLeadingConstraint;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewTrailingConstraint;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewTopConstraint;
@@ -140,6 +56,10 @@ static void EnsureDataDirectoryAndHintFile(void) {
 - (int32_t)mappedActionKeyForLogicalX;
 - (int32_t)mappedActionKeyForLogicalY;
 - (void)updateGameViewLayoutForCurrentOrientation;
+- (void)registerUserInteraction;
+- (void)resetMenuAutoHideTimer;
+- (void)onMenuAutoHideTimerFired:(NSTimer*)timer;
+- (BOOL)shouldHandleTouchAsGameMouse:(UITouch*)touch;
 - (void)pollRuntimeLog;
 - (void)attemptStartRunner;
 - (void)refreshStatus;
@@ -162,8 +82,12 @@ static void EnsureDataDirectoryAndHintFile(void) {
     self.hostFrameCounter = 0;
     self.displayLinkTickCounter = 0;
     self.runtimeLogOffset = 0;
+    self.fixedStepDeltaSeconds = 1.0f / 60.0f;
+    self.accumulatedDisplaySeconds = 0.0f;
+    self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+    self.lastDisplayLinkTimestamp = 0.0;
     self.logVisible = NO;
-    self.keyboardVisible = NO;
+    self.controlsVisible = YES;
     self.preferNintendoFaceSwap = NO;
     self.debugLines = [NSMutableArray array];
 
@@ -184,6 +108,7 @@ static void EnsureDataDirectoryAndHintFile(void) {
     self.menuButton.contentEdgeInsets = UIEdgeInsetsMake(6, 12, 6, 12);
     [self.view addSubview:self.menuButton];
     [self rebuildOptionsMenu];
+    [self registerUserInteraction];
 
     self.debugTextView = [[UITextView alloc] initWithFrame:CGRectZero];
     self.debugTextView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -197,17 +122,6 @@ static void EnsureDataDirectoryAndHintFile(void) {
     self.debugTextView.textContainerInset = UIEdgeInsetsMake(8, 8, 8, 8);
     self.debugTextView.hidden = !self.logVisible;
     [self.view addSubview:self.debugTextView];
-
-    self.keyboardField = [[UITextField alloc] initWithFrame:CGRectZero];
-    self.keyboardField.translatesAutoresizingMaskIntoConstraints = NO;
-    self.keyboardField.delegate = self;
-    self.keyboardField.autocorrectionType = UITextAutocorrectionTypeNo;
-    self.keyboardField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    self.keyboardField.spellCheckingType = UITextSpellCheckingTypeNo;
-    self.keyboardField.keyboardType = UIKeyboardTypeDefault;
-    self.keyboardField.returnKeyType = UIReturnKeyDefault;
-    self.keyboardField.hidden = YES;
-    [self.view addSubview:self.keyboardField];
 
     self.statusLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -230,11 +144,6 @@ static void EnsureDataDirectoryAndHintFile(void) {
         [self.debugTextView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12.0],
         [self.debugTextView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-12.0],
         [self.debugTextView.heightAnchor constraintEqualToConstant:170.0],
-
-        [self.keyboardField.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:-200.0],
-        [self.keyboardField.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:-200.0],
-        [self.keyboardField.widthAnchor constraintEqualToConstant:1.0],
-        [self.keyboardField.heightAnchor constraintEqualToConstant:1.0],
     ]];
 
     [self setupVirtualControls];
@@ -249,6 +158,9 @@ static void EnsureDataDirectoryAndHintFile(void) {
 
     [self.displayLink invalidate];
     self.displayLink = nil;
+
+    [self.menuAutoHideTimer invalidate];
+    self.menuAutoHideTimer = nil;
 
     if (self.runnerStarted) {
         ButterscotchIOS_stopRunner();
@@ -367,7 +279,6 @@ static void EnsureDataDirectoryAndHintFile(void) {
     button.tag = keyCode;
 
     [button addTarget:self action:@selector(onControlButtonDown:) forControlEvents:UIControlEventTouchDown];
-    [button addTarget:self action:@selector(onControlButtonDown:) forControlEvents:UIControlEventTouchDragEnter];
     [button addTarget:self action:@selector(onControlButtonUp:) forControlEvents:UIControlEventTouchUpInside];
     [button addTarget:self action:@selector(onControlButtonUp:) forControlEvents:UIControlEventTouchUpOutside];
     [button addTarget:self action:@selector(onControlButtonUp:) forControlEvents:UIControlEventTouchCancel];
@@ -397,10 +308,20 @@ static void EnsureDataDirectoryAndHintFile(void) {
 }
 
 - (void)onControlButtonDown:(UIButton*)sender {
+    [self registerUserInteraction];
+    if (sender.selected) {
+        return;
+    }
+    sender.selected = YES;
     [self setVirtualKey:(int32_t) sender.tag source:BS_KEY_SOURCE_TOUCH down:YES];
 }
 
 - (void)onControlButtonUp:(UIButton*)sender {
+    [self registerUserInteraction];
+    if (!sender.selected) {
+        return;
+    }
+    sender.selected = NO;
     [self setVirtualKey:(int32_t) sender.tag source:BS_KEY_SOURCE_TOUCH down:NO];
 }
 
@@ -486,52 +407,71 @@ static void EnsureDataDirectoryAndHintFile(void) {
         __unsafe_unretained typeof(self) weakSelf = self;
         UIAction* refreshAction = [UIAction actionWithTitle:@"Refresh" image:nil identifier:nil handler:^(__kindof UIAction* action) {
             (void) action;
+            [weakSelf registerUserInteraction];
             [weakSelf onRefreshTapped];
         }];
 
         NSString* logTitle = self.logVisible ? @"Hide Log" : @"Show Log";
         UIAction* logAction = [UIAction actionWithTitle:logTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
             (void) action;
+            [weakSelf registerUserInteraction];
             weakSelf.logVisible = !weakSelf.logVisible;
             weakSelf.debugTextView.hidden = !weakSelf.logVisible;
             [weakSelf appendDebugLine:[NSString stringWithFormat:@"[host] log %@", weakSelf.logVisible ? @"shown" : @"hidden"]];
             [weakSelf rebuildOptionsMenu];
         }];
 
-        NSString* keyboardTitle = self.keyboardVisible ? @"Hide Keyboard" : @"Show Keyboard";
-        UIAction* keyboardAction = [UIAction actionWithTitle:keyboardTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
+        NSString* controlsTitle = self.controlsVisible ? @"Hide On-Screen Controller" : @"Show On-Screen Controller";
+        UIAction* controlsAction = [UIAction actionWithTitle:controlsTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
             (void) action;
-            if (weakSelf.keyboardVisible) {
-                [weakSelf.keyboardField resignFirstResponder];
-                weakSelf.keyboardVisible = NO;
-            } else {
-                [weakSelf.keyboardField becomeFirstResponder];
-                weakSelf.keyboardVisible = YES;
-            }
-            [weakSelf appendDebugLine:[NSString stringWithFormat:@"[host] onscreen keyboard %@", weakSelf.keyboardVisible ? @"shown" : @"hidden"]];
+            [weakSelf registerUserInteraction];
+            weakSelf.controlsVisible = !weakSelf.controlsVisible;
+            weakSelf.controlsContainer.hidden = !weakSelf.controlsVisible;
+            [weakSelf appendDebugLine:[NSString stringWithFormat:@"[host] onscreen controller %@", weakSelf.controlsVisible ? @"shown" : @"hidden"]];
             [weakSelf rebuildOptionsMenu];
         }];
 
         NSString* swapTitle = self.preferNintendoFaceSwap ? @"Nintendo A/B + X/Y: On" : @"Nintendo A/B + X/Y: Off";
         UIAction* swapAction = [UIAction actionWithTitle:swapTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
             (void) action;
+            [weakSelf registerUserInteraction];
             weakSelf.preferNintendoFaceSwap = !weakSelf.preferNintendoFaceSwap;
             [weakSelf appendDebugLine:[NSString stringWithFormat:@"[host] nintendo face swap %@", weakSelf.preferNintendoFaceSwap ? @"enabled" : @"disabled"]];
             [weakSelf rebuildOptionsMenu];
         }];
 
-        self.menuButton.menu = [UIMenu menuWithTitle:@"" children:@[refreshAction, logAction, keyboardAction, swapAction]];
+        self.menuButton.menu = [UIMenu menuWithTitle:@"" children:@[refreshAction, logAction, controlsAction, swapAction]];
         self.menuButton.showsMenuAsPrimaryAction = YES;
     }
 }
 
+- (void)registerUserInteraction {
+    self.menuButton.hidden = NO;
+    self.menuButton.alpha = 1.0;
+    [self resetMenuAutoHideTimer];
+}
+
+- (void)resetMenuAutoHideTimer {
+    [self.menuAutoHideTimer invalidate];
+    self.menuAutoHideTimer = [NSTimer scheduledTimerWithTimeInterval:BS_MENU_AUTO_HIDE_SECONDS target:self selector:@selector(onMenuAutoHideTimerFired:) userInfo:nil repeats:NO];
+}
+
+- (void)onMenuAutoHideTimerFired:(NSTimer*)timer {
+    if (timer != self.menuAutoHideTimer) {
+        return;
+    }
+    self.menuButton.hidden = YES;
+}
+
 - (void)onControllerConnected:(NSNotification*)notification {
     (void) notification;
+    [self registerUserInteraction];
     [self appendDebugLine:@"[host] bluetooth controller connected"]; 
 }
 
 - (void)onControllerDisconnected:(NSNotification*)notification {
     (void) notification;
+    [self registerUserInteraction];
     [self appendDebugLine:@"[host] bluetooth controller disconnected"]; 
 }
 
@@ -616,7 +556,7 @@ static void EnsureDataDirectoryAndHintFile(void) {
         self.gameViewTrailingConstraint = [self.gameView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor];
         self.gameViewTopConstraint = [self.gameView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:0.0];
         self.gameViewBottomConstraint = [self.gameView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor];
-        self.gameViewPortraitHeightConstraint = [self.gameView.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.56];
+        self.gameViewPortraitHeightConstraint = [self.gameView.heightAnchor constraintEqualToAnchor:self.view.heightAnchor multiplier:0.45];
         [NSLayoutConstraint activateConstraints:@[
             self.gameViewLeadingConstraint,
             self.gameViewTrailingConstraint,
@@ -657,13 +597,18 @@ static void EnsureDataDirectoryAndHintFile(void) {
     self.sawFirstDrawCallback = NO;
     self.hostFrameCounter = 0;
     self.displayLinkTickCounter = 0;
-    self.previousTimestamp = 0.0;
+    self.accumulatedDisplaySeconds = 0.0f;
+    self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+    self.lastDisplayLinkTimestamp = 0.0;
     self.statusLabel.hidden = YES;
     [self appendDebugLine:@"[host] runner started"]; 
 
     int32_t targetHz = ButterscotchIOS_getTargetFrameHz();
     if (targetHz > 10 && targetHz <= 240) {
         self.preferredFramesPerSecond = targetHz;
+        self.fixedStepDeltaSeconds = 1.0f / (float) targetHz;
+    } else {
+        self.fixedStepDeltaSeconds = 1.0f / 60.0f;
     }
     [self appendDebugLine:[NSString stringWithFormat:@"[host] target fps: %ld", (long) self.preferredFramesPerSecond]];
 
@@ -678,19 +623,19 @@ static void EnsureDataDirectoryAndHintFile(void) {
         @"Butterscotch iOS\n\n"
          "No data.win found.\n\n"
          "Open Files > On My iPhone/iPad > Butterscotch\n"
-         "and copy your game file there as data.win, then tap Refresh.\n\n"
+         "and copy your game file there as active_chapter/data.win, then tap Refresh.\n\n"
          "Folder:\n%@",
         ButterscotchDataDirectory()];
 }
 
 - (void)onRefreshTapped {
+    [self registerUserInteraction];
     [self appendDebugLine:@"[host] manual refresh tapped"]; 
     [self pollRuntimeLog];
 
     if (self.runnerStarted) {
         ButterscotchIOS_stopRunner();
         self.runnerStarted = NO;
-        self.previousTimestamp = 0.0;
         for (int32_t i = 0; i < GML_KEY_COUNT; i++) {
             _keySourceMask[i] = 0;
         }
@@ -702,21 +647,50 @@ static void EnsureDataDirectoryAndHintFile(void) {
 }
 
 - (void)onDisplayLinkTick:(CADisplayLink*)link {
-    (void) link;
     if (self.gameView == nil) {
         return;
     }
 
     self.displayLinkTickCounter += 1;
-    if (self.displayLinkTickCounter % 120 == 0) {
-        [self appendDebugLine:[NSString stringWithFormat:@"[host] display tick %llu", self.displayLinkTickCounter]];
-    }
+    // if (self.displayLinkTickCounter % 120 == 0) {
+    //     [self appendDebugLine:[NSString stringWithFormat:@"[host] display tick %llu", self.displayLinkTickCounter]];
+    // }
 
     if (self.runnerStarted) {
         [self updateControllerInputState];
     }
 
-    [self.gameView setNeedsDisplay];
+    CFTimeInterval now = link.timestamp;
+    if (now <= 0.0) {
+        now = CACurrentMediaTime();
+    }
+
+    if (self.lastDisplayLinkTimestamp <= 0.0) {
+        self.lastDisplayLinkTimestamp = now;
+        self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+    } else {
+        CFTimeInterval elapsed = now - self.lastDisplayLinkTimestamp;
+        self.lastDisplayLinkTimestamp = now;
+
+        if (elapsed < 0.0) {
+            elapsed = 0.0;
+        }
+        if (elapsed > 0.25) {
+            elapsed = self.fixedStepDeltaSeconds;
+        }
+
+        self.accumulatedDisplaySeconds += (float) elapsed;
+        if (self.accumulatedDisplaySeconds + 0.00001f < self.fixedStepDeltaSeconds) {
+            return;
+        }
+
+        self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
+        self.accumulatedDisplaySeconds -= self.fixedStepDeltaSeconds;
+        if (self.accumulatedDisplaySeconds > self.fixedStepDeltaSeconds * 4.0f) {
+            self.accumulatedDisplaySeconds = self.fixedStepDeltaSeconds;
+        }
+    }
+
     [self.gameView display];
 }
 
@@ -735,12 +709,10 @@ static void EnsureDataDirectoryAndHintFile(void) {
         [self appendDebugLine:[NSString stringWithFormat:@"[host] first draw callback (%d x %d)", (int) view.drawableWidth, (int) view.drawableHeight]];
     }
 
-    CFTimeInterval now = CACurrentMediaTime();
-    float dt = 1.0f / (float) self.preferredFramesPerSecond;
-    if (self.previousTimestamp > 0.0) {
-        dt = (float) (now - self.previousTimestamp);
+    float dt = self.pendingFrameDeltaSeconds;
+    if (dt <= 0.0f) {
+        dt = self.fixedStepDeltaSeconds;
     }
-    self.previousTimestamp = now;
 
     [EAGLContext setCurrentContext:self.glContext];
     [view bindDrawable];
@@ -753,9 +725,9 @@ static void EnsureDataDirectoryAndHintFile(void) {
     int32_t result = ButterscotchIOS_stepAndDraw((int32_t) (view.drawableWidth), (int32_t) (view.drawableHeight), dt);
     [self pollRuntimeLog];
 
-    if (self.hostFrameCounter % 120 == 0) {
-        [self appendDebugLine:[NSString stringWithFormat:@"[host] frame %llu result=%d size=%dx%d", self.hostFrameCounter, (int) result, (int) view.drawableWidth, (int) view.drawableHeight]];
-    }
+    // if (self.hostFrameCounter % 120 == 0) {
+    //     [self appendDebugLine:[NSString stringWithFormat:@"[host] frame %llu result=%d size=%dx%d", self.hostFrameCounter, (int) result, (int) view.drawableWidth, (int) view.drawableHeight]];
+    // }
 
     GLenum glErr = glGetError();
     if (glErr != GL_NO_ERROR) {
@@ -778,41 +750,6 @@ static void EnsureDataDirectoryAndHintFile(void) {
     }
 }
 
-- (BOOL)textField:(UITextField*)textField shouldChangeCharactersInRange:(NSRange)range replacementString:(NSString*)string {
-    (void) textField;
-
-    if (!self.runnerStarted) {
-        return NO;
-    }
-
-    if (string.length == 0 && range.length > 0) {
-        ButterscotchIOS_onKeyDown(VK_BACKSPACE);
-        ButterscotchIOS_onKeyUp(VK_BACKSPACE);
-        return NO;
-    }
-
-    NSUInteger length = string.length;
-    for (NSUInteger i = 0; i < length; i++) {
-        unichar ch = [string characterAtIndex:i];
-        if (ch == 0) {
-            continue;
-        }
-
-        if (ch < 128) {
-            int32_t keyCode = (int32_t) ch;
-            if ('a' <= ch && ch <= 'z') {
-                keyCode = (int32_t) toupper((int) ch);
-            }
-            ButterscotchIOS_onKeyDown(keyCode);
-            ButterscotchIOS_onKeyUp(keyCode);
-        }
-
-        ButterscotchIOS_onCharacter((uint32_t) ch);
-    }
-
-    return NO;
-}
-
 - (void)updateMouseFromTouch:(UITouch*)touch inView:(UIView*)view {
     UIView* targetView = self.gameView != nil ? self.gameView : view;
     CGPoint point = [touch locationInView:targetView];
@@ -822,6 +759,26 @@ static void EnsureDataDirectoryAndHintFile(void) {
     float normalizedX = (float) (point.x / size.width);
     float normalizedY = (float) (point.y / size.height);
     ButterscotchIOS_setNormalizedCursorPosition(normalizedX, normalizedY);
+}
+
+- (BOOL)shouldHandleTouchAsGameMouse:(UITouch*)touch {
+    if (touch == nil) {
+        return NO;
+    }
+
+    CGPoint location = [touch locationInView:self.view];
+    UIView* hitView = [self.view hitTest:location withEvent:nil];
+    if (hitView == nil) {
+        return NO;
+    }
+
+    if ([hitView isDescendantOfView:self.controlsContainer] ||
+        [hitView isDescendantOfView:self.menuButton] ||
+        [hitView isDescendantOfView:self.debugTextView]) {
+        return NO;
+    }
+
+    return YES;
 }
 
 - (void)viewDidLayoutSubviews {
@@ -842,9 +799,11 @@ static void EnsureDataDirectoryAndHintFile(void) {
 
 - (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
     (void) event;
+    [self registerUserInteraction];
     if (!self.runnerStarted) return;
     UITouch* touch = touches.anyObject;
     if (touch == nil) return;
+    if (![self shouldHandleTouchAsGameMouse:touch]) return;
     [self updateMouseFromTouch:touch inView:self.view];
     self.mouseDown = YES;
     ButterscotchIOS_setMouseButtonState(0, true);
@@ -852,7 +811,9 @@ static void EnsureDataDirectoryAndHintFile(void) {
 
 - (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
     (void) event;
+    [self registerUserInteraction];
     if (!self.runnerStarted) return;
+    if (!self.mouseDown) return;
     UITouch* touch = touches.anyObject;
     if (touch == nil) return;
     [self updateMouseFromTouch:touch inView:self.view];
@@ -861,7 +822,9 @@ static void EnsureDataDirectoryAndHintFile(void) {
 - (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
     (void) touches;
     (void) event;
+    [self registerUserInteraction];
     if (!self.runnerStarted) return;
+    if (!self.mouseDown) return;
     self.mouseDown = NO;
     ButterscotchIOS_setMouseButtonState(0, false);
 }
@@ -869,7 +832,9 @@ static void EnsureDataDirectoryAndHintFile(void) {
 - (void)touchesCancelled:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
     (void) touches;
     (void) event;
+    [self registerUserInteraction];
     if (!self.runnerStarted) return;
+    if (!self.mouseDown) return;
     self.mouseDown = NO;
     ButterscotchIOS_setMouseButtonState(0, false);
 }
