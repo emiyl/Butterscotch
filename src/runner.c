@@ -3841,6 +3841,36 @@ void Runner_step(Runner* runner) {
         }
     }
 
+    if (runner->asyncVideoCompletionPending) {
+        runner->asyncVideoCompletionPending = false;
+
+        DsMapEntry* map = nullptr;
+        arrput(runner->dsMapPool, map);
+        int32_t mapId = arrlen(runner->dsMapPool) - 1;
+
+        DsMapEntry** mapPtr = &runner->dsMapPool[mapId];
+        shput(*mapPtr, safeStrdup("event_type"), RValue_makeOwnedString(safeStrdup("video_end")));
+        shput(*mapPtr, safeStrdup("type"), RValue_makeOwnedString(safeStrdup("video_end")));
+        shput(*mapPtr, safeStrdup("status"), RValue_makeReal(1.0));
+        shput(*mapPtr, safeStrdup("id"), RValue_makeReal(0.0));
+        shput(*mapPtr, safeStrdup("result"), RValue_makeOwnedString(safeStrdup("video_end")));
+
+        runner->asyncLoadMapId = mapId;
+        Runner_executeEventForAll(runner, EVENT_OTHER, OTHER_ASYNC_SYSTEM);
+        Runner_executeEventForAll(runner, EVENT_OTHER, OTHER_ASYNC_SOCIAL);
+
+        mapPtr = &runner->dsMapPool[mapId];
+        if (*mapPtr != nullptr) {
+            repeat(shlen(*mapPtr), j) {
+                free((*mapPtr)[j].key);
+                RValue_free(&(*mapPtr)[j].value);
+            }
+            shfree(*mapPtr);
+            *mapPtr = nullptr;
+        }
+        runner->asyncLoadMapId = -1;
+    }
+
     // Resolve a pending Xbox One account-picker request
     if (runner->xboxAccountPickerPendingId >= 0) {
         DsMapEntry* map = nullptr;

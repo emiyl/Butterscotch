@@ -493,3 +493,8 @@ uint64_t ButterscotchIOS_getFrameCount(void) {
     if (gRunner == nullptr) return 0;
     return (uint64_t) gRunner->frameCount;
 }
+
+void ButterscotchIOS_queueVideoCompletedEvent(void) {
+    if (gRunner == nullptr) return;
+    gRunner->asyncVideoCompletionPending = true;
+}

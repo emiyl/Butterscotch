@@ -61,6 +61,7 @@ void ButterscotchIOS_videoResume(void);
 void ButterscotchIOS_videoEnableLoop(bool enabled);
 void ButterscotchIOS_videoSetVolume(float volume);
 int32_t ButterscotchIOS_videoGetFormat(void);
+void ButterscotchIOS_queueVideoCompletedEvent(void);
 
 int32_t ButterscotchIOS_getTargetFrameHz(void);
 int32_t ButterscotchIOS_getRoomCount(void);

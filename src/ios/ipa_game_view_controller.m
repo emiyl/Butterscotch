@@ -6,6 +6,8 @@
 #import <QuartzCore/CADisplayLink.h>
 #import <OpenGLES/ES3/gl.h>
 
+#include <stdatomic.h>
+
 #include "ios/butterscotch_ios.h"
 #include "ios/ipa_support.h"
 #include "runner_keyboard.h"
@@ -19,27 +21,29 @@ static const int32_t BS_KEY_ACTION_A = 'Z';
 static const int32_t BS_KEY_ACTION_B = 'X';
 static const int32_t BS_KEY_ACTION_X = 'C';
 static const int32_t BS_KEY_ACTION_Y = 'V';
+static const CFTimeInterval BS_VIDEO_STALL_TIMEOUT_SECONDS = 2.0;
+static const CFTimeInterval BS_VIDEO_MIN_WATCHDOG_DELAY_SECONDS = 1.0;
+static const CFTimeInterval BS_VIDEO_HARD_TIMEOUT_SECONDS = 45.0;
 
 static __unsafe_unretained ButterscotchGameViewController* gActiveGameController = nil;
+static _Atomic(bool) gIOSVideoIsOpen = false;
+static _Atomic(bool) gIOSVideoIsPlaying = false;
 
 @interface ButterscotchGameViewController ()
 @property(strong, nonatomic) UILabel* statusLabel;
 @property(strong, nonatomic) UIButton* menuButton;
-@property(strong, nonatomic) UITextView* debugTextView;
+@property(strong, nonatomic) UIButton* fastForwardButton;
 @property(strong, nonatomic) UIView* controlsContainer;
 @property(strong, nonatomic) GLKView* gameView;
 @property(strong, nonatomic) EAGLContext* glContext;
 @property(strong, nonatomic) CADisplayLink* displayLink;
-@property(strong, nonatomic) NSMutableArray<NSString*>* debugLines;
 @property(assign, nonatomic) BOOL runnerStarted;
 @property(assign, nonatomic) BOOL mouseDown;
-@property(assign, nonatomic) BOOL logVisible;
 @property(assign, nonatomic) BOOL controlsVisible;
 @property(assign, nonatomic) BOOL sawNoPresentResult;
 @property(assign, nonatomic) BOOL sawFirstDrawCallback;
 @property(assign, nonatomic) uint64_t hostFrameCounter;
 @property(assign, nonatomic) uint64_t displayLinkTickCounter;
-@property(assign, nonatomic) unsigned long long runtimeLogOffset;
 @property(assign, nonatomic) float fixedStepDeltaSeconds;
 @property(assign, nonatomic) float accumulatedDisplaySeconds;
 @property(assign, nonatomic) float pendingFrameDeltaSeconds;
@@ -48,11 +52,18 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
 @property(assign, nonatomic) BOOL preferNintendoFaceSwap;
 @property(strong, nonatomic) NSTimer* menuAutoHideTimer;
 @property(assign, nonatomic) BOOL sessionPaused;
+@property(assign, nonatomic) BOOL fastForwardEnabled;
 @property(strong, nonatomic) AVPlayer* videoPlayer;
 @property(strong, nonatomic) AVPlayerLayer* videoLayer;
 @property(strong, nonatomic) id videoEndObserver;
+@property(strong, nonatomic) id videoTimeObserver;
 @property(assign, nonatomic) BOOL videoLoopEnabled;
 @property(assign, nonatomic) float videoVolume;
+@property(assign, nonatomic) BOOL videoPausedByScript;
+@property(assign, nonatomic) BOOL videoClosePending;
+@property(assign, nonatomic) CFTimeInterval videoLastProgressHostTime;
+@property(assign, nonatomic) double videoLastProgressSeconds;
+@property(assign, nonatomic) CFTimeInterval videoOpenedHostTime;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewLeadingConstraint;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewTrailingConstraint;
 @property(strong, nonatomic) NSLayoutConstraint* gameViewTopConstraint;
@@ -89,19 +100,22 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
     self.sawFirstDrawCallback = NO;
     self.hostFrameCounter = 0;
     self.displayLinkTickCounter = 0;
-    self.runtimeLogOffset = 0;
     self.fixedStepDeltaSeconds = 1.0f / 60.0f;
     self.accumulatedDisplaySeconds = 0.0f;
     self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
     self.pendingSimulationSteps = 1;
     self.lastDisplayLinkTimestamp = 0.0;
-    self.logVisible = NO;
-    self.controlsVisible = YES;
+    self.controlsVisible = NO;
     self.sessionPaused = YES;
+    self.fastForwardEnabled = NO;
     self.videoLoopEnabled = NO;
     self.videoVolume = 1.0f;
+    self.videoPausedByScript = NO;
+    self.videoClosePending = NO;
+    self.videoLastProgressHostTime = 0.0;
+    self.videoLastProgressSeconds = 0.0;
+    self.videoOpenedHostTime = 0.0;
     self.preferNintendoFaceSwap = BSLoadNintendoSwap();
-    self.debugLines = [NSMutableArray array];
 
     self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(onDisplayLinkTick:)];
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
@@ -118,21 +132,21 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
     self.menuButton.layer.cornerRadius = 8.0;
     self.menuButton.contentEdgeInsets = UIEdgeInsetsMake(6, 12, 6, 12);
     [self.view addSubview:self.menuButton];
+
+    self.fastForwardButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.fastForwardButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.fastForwardButton setTitle:@"FF" forState:UIControlStateNormal];
+    self.fastForwardButton.titleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightBold];
+    self.fastForwardButton.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.85];
+    [self.fastForwardButton setTitleColor:[UIColor colorWithWhite:0.85 alpha:1.0] forState:UIControlStateNormal];
+    self.fastForwardButton.layer.cornerRadius = 8.0;
+    self.fastForwardButton.contentEdgeInsets = UIEdgeInsetsMake(6, 10, 6, 10);
+    [self.fastForwardButton addTarget:self action:@selector(onFastForwardTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.fastForwardButton];
+    [self updateFastForwardButtonAppearance];
+
     [self rebuildOptionsMenu];
     [self registerUserInteraction];
-
-    self.debugTextView = [[UITextView alloc] initWithFrame:CGRectZero];
-    self.debugTextView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.debugTextView.editable = NO;
-    self.debugTextView.selectable = YES;
-    self.debugTextView.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.55];
-    self.debugTextView.textColor = [UIColor colorWithRed:1.0 green:0.92 blue:0.78 alpha:1.0];
-    self.debugTextView.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightRegular];
-    self.debugTextView.text = @"[debug] waiting for runtime logs...";
-    self.debugTextView.layer.cornerRadius = 8.0;
-    self.debugTextView.textContainerInset = UIEdgeInsetsMake(8, 8, 8, 8);
-    self.debugTextView.hidden = !self.logVisible;
-    [self.view addSubview:self.debugTextView];
 
     self.statusLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -147,21 +161,18 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
         [self.menuButton.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-16.0],
         [self.menuButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:12.0],
 
-        [self.statusLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20.0],
-        [self.statusLabel.trailingAnchor constraintEqualToAnchor:self.menuButton.leadingAnchor constant:-12.0],
-        [self.statusLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:14.0],
+        [self.fastForwardButton.trailingAnchor constraintEqualToAnchor:self.menuButton.leadingAnchor constant:-8.0],
+        [self.fastForwardButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:12.0],
 
-        [self.debugTextView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12.0],
-        [self.debugTextView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12.0],
-        [self.debugTextView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-12.0],
-        [self.debugTextView.heightAnchor constraintEqualToConstant:170.0],
+        [self.statusLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20.0],
+        [self.statusLabel.trailingAnchor constraintEqualToAnchor:self.fastForwardButton.leadingAnchor constant:-12.0],
+        [self.statusLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:14.0],
     ]];
 
     [self setupVirtualControls];
 
     [self appendDebugLine:[NSString stringWithFormat:@"[host] launch: %@", self.launchTitle]];
     [self appendDebugLine:[NSString stringWithFormat:@"[host] data folder: %@", ButterscotchDataDirectory()]];
-    [self appendDebugLine:[NSString stringWithFormat:@"[host] runtime log: %@", ButterscotchRuntimeLogPath()]];
     [self attemptStartRunner];
 }
 
@@ -177,6 +188,10 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
     if (self.videoEndObserver != nil) {
         [[NSNotificationCenter defaultCenter] removeObserver:self.videoEndObserver];
         self.videoEndObserver = nil;
+    }
+    if (self.videoPlayer != nil && self.videoTimeObserver != nil) {
+        [self.videoPlayer removeTimeObserver:self.videoTimeObserver];
+        self.videoTimeObserver = nil;
     }
     [self.videoPlayer pause];
     [self.videoLayer removeFromSuperlayer];
@@ -231,11 +246,13 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
         }
         ButterscotchIOS_suspendAudio();
         [self.videoPlayer pause];
+        atomic_store(&gIOSVideoIsPlaying, false);
     } else {
         self.lastDisplayLinkTimestamp = 0.0;
         ButterscotchIOS_resumeAudio();
         if (self.videoPlayer != nil) {
             [self.videoPlayer play];
+            atomic_store(&gIOSVideoIsPlaying, true);
         }
     }
 }
@@ -254,15 +271,12 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
         return;
     }
 
-    [self.debugLines addObject:line];
-    if (self.debugLines.count > 220) {
-        [self.debugLines removeObjectsInRange:NSMakeRange(0, self.debugLines.count - 220)];
-    }
-
-    self.debugTextView.text = [self.debugLines componentsJoinedByString:@"\n"];
-    if (self.debugTextView.text.length > 0) {
-        NSRange bottom = NSMakeRange(self.debugTextView.text.length - 1, 1);
-        [self.debugTextView scrollRangeToVisible:bottom];
+    // Mirror all host debug lines to Xcode's console for easier device debugging.
+    NSLog(@"%@", line);
+    const char* utf8 = [line UTF8String];
+    if (utf8 != NULL) {
+        fprintf(stdout, "%s\n", utf8);
+        fflush(stdout);
     }
 }
 
@@ -511,15 +525,6 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
             }
         }];
 
-        NSString* logTitle = self.logVisible ? @"Hide Log" : @"Show log";
-        UIAction* logAction = [UIAction actionWithTitle:logTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
-            (void) action;
-            [weakSelf registerUserInteraction];
-            weakSelf.logVisible = !weakSelf.logVisible;
-            weakSelf.debugTextView.hidden = !weakSelf.logVisible;
-            [weakSelf rebuildOptionsMenu];
-        }];
-
         NSString* controlsTitle = self.controlsVisible ? @"Hide on-screen controller" : @"Show on-screen controller";
         UIAction* controlsAction = [UIAction actionWithTitle:controlsTitle image:nil identifier:nil handler:^(__kindof UIAction* action) {
             (void) action;
@@ -531,7 +536,7 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
 
         self.menuButton.menu = [UIMenu menuWithTitle:@"" children:@[
             backAction,
-            logAction, controlsAction,
+            controlsAction,
         ]];
         self.menuButton.showsMenuAsPrimaryAction = YES;
     }
@@ -539,6 +544,7 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
 
 - (void)registerUserInteraction {
     self.menuButton.hidden = NO;
+    self.fastForwardButton.hidden = NO;
     [self resetMenuAutoHideTimer];
 }
 
@@ -552,56 +558,34 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
         return;
     }
     self.menuButton.hidden = YES;
+    self.fastForwardButton.hidden = YES;
+}
+
+- (void)onFastForwardTapped:(UIButton*)sender {
+    (void) sender;
+    [self registerUserInteraction];
+    self.fastForwardEnabled = !self.fastForwardEnabled;
+    [self updateFastForwardButtonAppearance];
+
+    NSString* state = self.fastForwardEnabled ? @"enabled" : @"disabled";
+    [self appendDebugLine:[NSString stringWithFormat:@"[host] fast-forward %@", state]];
+}
+
+- (void)updateFastForwardButtonAppearance {
+    UIColor* activeColor = [UIColor colorWithRed:0.20 green:0.48 blue:0.22 alpha:0.92];
+    UIColor* inactiveColor = [UIColor colorWithWhite:0.12 alpha:0.85];
+    UIColor* activeText = [UIColor colorWithWhite:1.0 alpha:1.0];
+    UIColor* inactiveText = [UIColor colorWithWhite:0.85 alpha:1.0];
+
+    self.fastForwardButton.backgroundColor = self.fastForwardEnabled ? activeColor : inactiveColor;
+    [self.fastForwardButton setTitleColor:(self.fastForwardEnabled ? activeText : inactiveText) forState:UIControlStateNormal];
 }
 
 - (void)onControllerConnected:(NSNotification*)notification { (void) notification; [self registerUserInteraction]; [self appendDebugLine:@"[host] bluetooth controller connected"]; }
 - (void)onControllerDisconnected:(NSNotification*)notification { (void) notification; [self registerUserInteraction]; [self appendDebugLine:@"[host] bluetooth controller disconnected"]; }
 
-- (void)pollRuntimeLog {
-    NSString* logPath = ButterscotchRuntimeLogPath();
-    NSData* data = [NSData dataWithContentsOfFile:logPath];
-    if (data == nil) {
-        return;
-    }
-
-    unsigned long long length = (unsigned long long) data.length;
-    if (length < self.runtimeLogOffset) {
-        self.runtimeLogOffset = 0;
-    }
-    if (length == self.runtimeLogOffset) {
-        return;
-    }
-
-    NSUInteger start = (NSUInteger) self.runtimeLogOffset;
-    NSUInteger deltaLen = (NSUInteger) (length - self.runtimeLogOffset);
-    NSData* delta = [data subdataWithRange:NSMakeRange(start, deltaLen)];
-    self.runtimeLogOffset = length;
-
-    NSString* chunk = [[NSString alloc] initWithData:delta encoding:NSUTF8StringEncoding];
-    if (chunk == nil) {
-        chunk = [[NSString alloc] initWithData:delta encoding:NSASCIIStringEncoding];
-    }
-    if (chunk.length == 0) {
-        return;
-    }
-
-    NSArray<NSString*>* lines = [chunk componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
-    for (NSString* line in lines) {
-        NSString* trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (trimmed.length == 0) {
-            continue;
-        }
-        if (!ShouldDisplayRuntimeLogLine(trimmed)) {
-            continue;
-        }
-        [self appendDebugLine:[NSString stringWithFormat:@"[stderr] %@", trimmed]];
-    }
-}
-
 - (void)attemptStartRunner {
     EnsureDataDirectoryAndHintFile();
-    RedirectStderrToRuntimeLog();
-    [self pollRuntimeLog];
 
     NSString* dataWinPath = ButterscotchPathFromDataDirectory(self.launchRelativeDataWinPath);
     if (![[NSFileManager defaultManager] fileExistsAtPath:dataWinPath]) {
@@ -663,7 +647,6 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &hostFramebuffer);
 
     BOOL started = ButterscotchIOS_startRunner(dataWinPath.UTF8String, savesPath.UTF8String, BS_IOS_OS_IOS, (uint32_t) hostFramebuffer);
-    [self pollRuntimeLog];
     if (!started) {
         self.statusLabel.text = @"Found data.win, but runner failed to start.";
         return;
@@ -707,7 +690,7 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
         required];
 }
 
-- (void)onRefreshTapped { [self registerUserInteraction]; [self pollRuntimeLog]; [self shutdownRunnerSession]; [self attemptStartRunner]; }
+- (void)onRefreshTapped { [self registerUserInteraction]; [self shutdownRunnerSession]; [self attemptStartRunner]; }
 
 - (void)onDisplayLinkTick:(CADisplayLink*)link {
     if (self.gameView == nil || self.sessionPaused) {
@@ -744,9 +727,12 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
             return;
         }
 
-        NSInteger speedMultiplier = BSLoadSpeedMultiplier();
-        if (speedMultiplier < 1) speedMultiplier = 1;
-        if (speedMultiplier > 4) speedMultiplier = 4;
+        NSInteger speedMultiplier = 1;
+        if (self.fastForwardEnabled) {
+            speedMultiplier = BSLoadSpeedMultiplier();
+            if (speedMultiplier < 1) speedMultiplier = 1;
+            if (speedMultiplier > 4) speedMultiplier = 4;
+        }
         self.pendingFrameDeltaSeconds = self.fixedStepDeltaSeconds;
         self.pendingSimulationSteps = speedMultiplier;
         self.accumulatedDisplaySeconds -= self.fixedStepDeltaSeconds;
@@ -762,7 +748,6 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
     (void) rect;
 
     if (!self.runnerStarted) {
-        [self pollRuntimeLog];
         [self refreshStatus];
         return;
     }
@@ -791,7 +776,6 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
             break;
         }
     }
-    [self pollRuntimeLog];
 
     GLenum glErr = glGetError();
     if (glErr != GL_NO_ERROR) {
@@ -801,8 +785,10 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
     if (result == BS_IOS_SHOULD_EXIT) {
         [self shutdownRunnerSession];
         [self refreshStatus];
-    } else if (self.videoPlayer != nil && [self videoPlaybackHasFinished]) {
-        [self closeVideoPlayback];
+    } else if (self.videoPlayer != nil) {
+        [self closeVideoPlaybackIfTimedOut];
+        [self closeVideoPlaybackIfStalled];
+        [self closeVideoPlaybackIfFinished];
     }
 }
 
@@ -819,7 +805,7 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
 
     if ([hitView isDescendantOfView:self.controlsContainer] ||
         [hitView isDescendantOfView:self.menuButton] ||
-        [hitView isDescendantOfView:self.debugTextView]) {
+        [hitView isDescendantOfView:self.fastForwardButton]) {
         return NO;
     }
 
@@ -887,7 +873,13 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
     NSURL* url = [NSURL fileURLWithPath:absolutePath];
     AVPlayerItem* item = [AVPlayerItem playerItemWithURL:url];
     self.videoPlayer = [AVPlayer playerWithPlayerItem:item];
+    atomic_store(&gIOSVideoIsOpen, true);
     self.videoPlayer.volume = self.videoVolume;
+    self.videoPausedByScript = NO;
+    self.videoClosePending = NO;
+    self.videoLastProgressHostTime = CACurrentMediaTime();
+    self.videoLastProgressSeconds = 0.0;
+    self.videoOpenedHostTime = self.videoLastProgressHostTime;
 
     self.videoLayer = [AVPlayerLayer playerLayerWithPlayer:self.videoPlayer];
     self.videoLayer.videoGravity = AVLayerVideoGravityResizeAspect;
@@ -912,18 +904,58 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
                             }
                         }];
                     } else {
-                        [weakSelf closeVideoPlayback];
+                        [weakSelf requestCloseVideoPlaybackWithReason:@"[video] completed (notification)"];
                     }
                 }];
 
+    CMTime observerInterval = CMTimeMakeWithSeconds(0.25, 600);
+    self.videoTimeObserver = [self.videoPlayer addPeriodicTimeObserverForInterval:observerInterval
+                                                                             queue:dispatch_get_main_queue()
+                                                                        usingBlock:^(CMTime time) {
+        (void) time;
+        if (weakSelf == nil || weakSelf.videoPlayer == nil) {
+            return;
+        }
+        // Avoid teardown reentrancy from AVPlayer callbacks.
+    }];
+
     if (!self.sessionPaused) {
         [self.videoPlayer play];
+        atomic_store(&gIOSVideoIsPlaying, true);
+    } else {
+        atomic_store(&gIOSVideoIsPlaying, false);
     }
     [self appendDebugLine:[NSString stringWithFormat:@"[video] playing %@", absolutePath.lastPathComponent]];
     return YES;
 }
 
+- (void)requestCloseVideoPlaybackWithReason:(NSString*)reason {
+    if (self.videoPlayer == nil || self.videoClosePending) {
+        return;
+    }
+
+    self.videoClosePending = YES;
+    ButterscotchIOS_queueVideoCompletedEvent();
+    atomic_store(&gIOSVideoIsOpen, false);
+    atomic_store(&gIOSVideoIsPlaying, false);
+    if (reason != nil && reason.length > 0) {
+        [self appendDebugLine:reason];
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self.videoClosePending) {
+            return;
+        }
+        self.videoClosePending = NO;
+        [self closeVideoPlayback];
+    });
+}
+
 - (void)closeVideoPlayback {
+    if (self.videoPlayer != nil && self.videoTimeObserver != nil) {
+        [self.videoPlayer removeTimeObserver:self.videoTimeObserver];
+        self.videoTimeObserver = nil;
+    }
     if (self.videoEndObserver != nil) {
         [[NSNotificationCenter defaultCenter] removeObserver:self.videoEndObserver];
         self.videoEndObserver = nil;
@@ -932,10 +964,90 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
     [self.videoLayer removeFromSuperlayer];
     self.videoLayer = nil;
     self.videoPlayer = nil;
+    self.videoPausedByScript = NO;
+    self.videoClosePending = NO;
+    atomic_store(&gIOSVideoIsOpen, false);
+    atomic_store(&gIOSVideoIsPlaying, false);
+    self.videoLastProgressHostTime = 0.0;
+    self.videoLastProgressSeconds = 0.0;
+    self.videoOpenedHostTime = 0.0;
 }
 
-- (BOOL)videoIsOpen { return self.videoPlayer != nil; }
-- (BOOL)videoIsPlaying { return self.videoPlayer != nil && !self.sessionPaused && self.videoPlayer.rate > 0.0f; }
+- (void)closeVideoPlaybackIfTimedOut {
+    if (self.videoPlayer == nil || self.sessionPaused || self.videoPausedByScript) {
+        return;
+    }
+    if (self.videoOpenedHostTime <= 0.0) {
+        return;
+    }
+
+    CFTimeInterval now = CACurrentMediaTime();
+    CFTimeInterval age = now - self.videoOpenedHostTime;
+    if (age < BS_VIDEO_HARD_TIMEOUT_SECONDS) {
+        return;
+    }
+
+    [self requestCloseVideoPlaybackWithReason:[NSString stringWithFormat:@"[video] completed (hard-timeout %.1fs, loop=%@)", age, self.videoLoopEnabled ? @"on" : @"off"]];
+}
+
+- (void)closeVideoPlaybackIfStalled {
+    if (self.videoPlayer == nil || self.videoLoopEnabled || self.sessionPaused || self.videoPausedByScript) {
+        return;
+    }
+
+    AVPlayerItem* item = self.videoPlayer.currentItem;
+    if (item == nil || item.status != AVPlayerItemStatusReadyToPlay) {
+        return;
+    }
+
+    CMTime currentTime = [self.videoPlayer currentTime];
+    if (currentTime.timescale <= 0 || currentTime.value < 0) {
+        return;
+    }
+
+    double currentSeconds = (double) currentTime.value / (double) currentTime.timescale;
+    CFTimeInterval now = CACurrentMediaTime();
+
+    if (currentSeconds > self.videoLastProgressSeconds + 0.02) {
+        self.videoLastProgressSeconds = currentSeconds;
+        self.videoLastProgressHostTime = now;
+        return;
+    }
+
+    if (self.videoLastProgressHostTime <= 0.0) {
+        self.videoLastProgressHostTime = now;
+        return;
+    }
+
+    CFTimeInterval openAge = now - self.videoLastProgressHostTime;
+    if (currentSeconds <= 0.01 || openAge < BS_VIDEO_MIN_WATCHDOG_DELAY_SECONDS) {
+        return;
+    }
+
+    if ((now - self.videoLastProgressHostTime) >= BS_VIDEO_STALL_TIMEOUT_SECONDS) {
+        [self requestCloseVideoPlaybackWithReason:[NSString stringWithFormat:@"[video] completed (watchdog, stalled at %.2fs)", currentSeconds]];
+    }
+}
+
+- (void)closeVideoPlaybackIfFinished {
+    if (self.videoPlayer == nil) {
+        return;
+    }
+    if (![self videoPlaybackHasFinished]) {
+        return;
+    }
+
+    [self requestCloseVideoPlaybackWithReason:@"[video] completed (draw/poll v2)"];
+}
+
+- (BOOL)videoIsOpen {
+    // Keep query methods side-effect free; teardown runs in draw/observer paths.
+    return self.videoPlayer != nil;
+}
+
+- (BOOL)videoIsPlaying {
+    return self.videoPlayer != nil && !self.sessionPaused && self.videoPlayer.rate > 0.0f;
+}
 
 - (BOOL)videoPlaybackHasFinished {
     if (self.videoPlayer == nil || self.videoLoopEnabled) {
@@ -947,6 +1059,10 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
         return NO;
     }
 
+    if (item.status == AVPlayerItemStatusFailed || item.error != nil) {
+        return YES;
+    }
+
     CMTime duration = item.duration;
     CMTime currentTime = [self.videoPlayer currentTime];
     if (duration.timescale <= 0 || currentTime.timescale <= 0) {
@@ -956,13 +1072,31 @@ static __unsafe_unretained ButterscotchGameViewController* gActiveGameController
         return NO;
     }
 
-    int64_t currentScaled = (int64_t) currentTime.value * (int64_t) duration.timescale;
-    int64_t durationScaled = (int64_t) duration.value * (int64_t) currentTime.timescale;
-    return currentScaled >= durationScaled;
+    double durationSeconds = (double) duration.value / (double) duration.timescale;
+    double currentSeconds = (double) currentTime.value / (double) currentTime.timescale;
+    double remainingSeconds = durationSeconds - currentSeconds;
+
+    if (remainingSeconds <= 0.05) {
+        return YES;
+    }
+
+    if (self.videoPlayer.rate <= 0.0f && currentSeconds > 0.0 && remainingSeconds <= 0.35) {
+        return YES;
+    }
+
+    return NO;
 }
 
-- (void)videoPausePlayback { [self.videoPlayer pause]; }
-- (void)videoResumePlayback { if (self.videoPlayer != nil && !self.sessionPaused) { [self.videoPlayer play]; } }
+- (void)videoPausePlayback { self.videoPausedByScript = YES; [self.videoPlayer pause]; atomic_store(&gIOSVideoIsPlaying, false); }
+- (void)videoResumePlayback {
+    self.videoPausedByScript = NO;
+    if (self.videoPlayer != nil && !self.sessionPaused) {
+        [self.videoPlayer play];
+        atomic_store(&gIOSVideoIsPlaying, true);
+    } else {
+        atomic_store(&gIOSVideoIsPlaying, false);
+    }
+}
 - (void)videoSetLoopEnabled:(BOOL)enabled { self.videoLoopEnabled = enabled; }
 - (void)videoSetVolume:(float)volume { if (volume < 0.0f) volume = 0.0f; if (volume > 1.0f) volume = 1.0f; self.videoVolume = volume; if (self.videoPlayer != nil) { self.videoPlayer.volume = volume; } }
 - (int32_t)videoGetFormat { return 0; }
@@ -1001,46 +1135,39 @@ void ButterscotchIOS_videoClose(void) {
         ButterscotchGameViewController* controller = gActiveGameController;
         if (controller != nil) {
             [controller closeVideoPlayback];
+        } else {
+            atomic_store(&gIOSVideoIsOpen, false);
+            atomic_store(&gIOSVideoIsPlaying, false);
         }
     };
 
     if ([NSThread isMainThread]) {
         closeBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), closeBlock);
+        dispatch_async(dispatch_get_main_queue(), closeBlock);
     }
 }
 
 bool ButterscotchIOS_videoIsOpen(void) {
-    __block BOOL open = NO;
-    void (^queryBlock)(void) = ^{
-        ButterscotchGameViewController* controller = gActiveGameController;
-        open = (controller != nil) ? [controller videoIsOpen] : NO;
-    };
-
     if ([NSThread isMainThread]) {
-        queryBlock();
+        ButterscotchGameViewController* controller = gActiveGameController;
+        BOOL open = (controller != nil) ? [controller videoIsOpen] : NO;
+        atomic_store(&gIOSVideoIsOpen, open ? true : false);
+        return open ? true : false;
     } else {
-        dispatch_sync(dispatch_get_main_queue(), queryBlock);
+        return atomic_load(&gIOSVideoIsOpen);
     }
-
-    return open;
 }
 
 bool ButterscotchIOS_videoIsPlaying(void) {
-    __block BOOL playing = NO;
-    void (^queryBlock)(void) = ^{
-        ButterscotchGameViewController* controller = gActiveGameController;
-        playing = (controller != nil) ? [controller videoIsPlaying] : NO;
-    };
-
     if ([NSThread isMainThread]) {
-        queryBlock();
+        ButterscotchGameViewController* controller = gActiveGameController;
+        BOOL playing = (controller != nil) ? [controller videoIsPlaying] : NO;
+        atomic_store(&gIOSVideoIsPlaying, playing ? true : false);
+        return playing ? true : false;
     } else {
-        dispatch_sync(dispatch_get_main_queue(), queryBlock);
+        return atomic_load(&gIOSVideoIsPlaying);
     }
-
-    return playing;
 }
 
 void ButterscotchIOS_videoPause(void) {
@@ -1048,13 +1175,15 @@ void ButterscotchIOS_videoPause(void) {
         ButterscotchGameViewController* controller = gActiveGameController;
         if (controller != nil) {
             [controller videoPausePlayback];
+        } else {
+            atomic_store(&gIOSVideoIsPlaying, false);
         }
     };
 
     if ([NSThread isMainThread]) {
         pauseBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), pauseBlock);
+        dispatch_async(dispatch_get_main_queue(), pauseBlock);
     }
 }
 
@@ -1063,13 +1192,15 @@ void ButterscotchIOS_videoResume(void) {
         ButterscotchGameViewController* controller = gActiveGameController;
         if (controller != nil) {
             [controller videoResumePlayback];
+        } else {
+            atomic_store(&gIOSVideoIsPlaying, false);
         }
     };
 
     if ([NSThread isMainThread]) {
         resumeBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), resumeBlock);
+        dispatch_async(dispatch_get_main_queue(), resumeBlock);
     }
 }
 
@@ -1084,7 +1215,7 @@ void ButterscotchIOS_videoEnableLoop(bool enabled) {
     if ([NSThread isMainThread]) {
         loopBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), loopBlock);
+        dispatch_async(dispatch_get_main_queue(), loopBlock);
     }
 }
 
@@ -1099,7 +1230,7 @@ void ButterscotchIOS_videoSetVolume(float volume) {
     if ([NSThread isMainThread]) {
         volumeBlock();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), volumeBlock);
+        dispatch_async(dispatch_get_main_queue(), volumeBlock);
     }
 }
 
