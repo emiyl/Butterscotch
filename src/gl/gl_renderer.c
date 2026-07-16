@@ -15,6 +15,7 @@
 #include "stb_image.h"
 #include "stb_ds.h"
 #include "utils.h"
+#include "string_builder.h"
 #include "image_decoder.h"
 #include "gl_common.h"
 
@@ -117,6 +118,31 @@ static GLuint linkProgram(const char* name, uint32_t vertexAttributeCount, const
         fprintf(stderr, "GL: Shader %s succesfully linked!\n", name);
     }
     return program;
+}
+
+static char* upgradeLegacyDesktopShaderSource(const char* source, bool isVertexShader) {
+    if (source == nullptr) return nullptr;
+    if (!strstr(source, "#version 120")) return safeStrdup(source);
+
+    const char* body = strchr(source, '\n');
+    if (body != nullptr) {
+        body += 1;
+    } else {
+        body = source + strlen(source);
+    }
+
+    StringBuilder shaderSource = StringBuilder_create(strlen(source) + 128);
+    StringBuilder_append(&shaderSource, "#version 150\n");
+    if (isVertexShader) {
+        StringBuilder_append(&shaderSource, "#define attribute in\n#define varying out\n");
+    } else {
+        StringBuilder_append(&shaderSource, "#define varying in\n#define texture2D texture\n#define gl_FragColor bs_FragColor\nout vec4 bs_FragColor;\n");
+    }
+    StringBuilder_append(&shaderSource, body);
+
+    char* upgradedSource = StringBuilder_toString(&shaderSource);
+    StringBuilder_free(&shaderSource);
+    return upgradedSource;
 }
 
 GLShaderUniform* findShaderUniformByName(GMLShader* shader, const char* name) {
@@ -378,19 +404,11 @@ static void glInit(Renderer* renderer, DataWin* dataWin) {
         char* patchedVertexSource = nullptr;
         char* patchedFragmentSource = nullptr;
 
-        if (!gl->isGLES && ver.major == 2 && ver.minor == 0) { // super opengl 2.0 fuckery go go
-            if (vertexShaderSource && strstr(vertexShaderSource, "#version 120")) {
-                patchedVertexSource = safeStrdup(vertexShaderSource);
-                char* loc = strstr(patchedVertexSource, "#version 120");
-                if (loc) loc[10] = '1';
-                vertexShaderSource = patchedVertexSource;
-            }
-            if (fragmentShaderSource && strstr(fragmentShaderSource, "#version 120")) {
-                patchedFragmentSource = safeStrdup(fragmentShaderSource);
-                char* loc = strstr(patchedFragmentSource, "#version 120");
-                if (loc) loc[10] = '1';
-                fragmentShaderSource = patchedFragmentSource;
-            }
+        if (!gl->isGLES && ver.major >= 3) {
+            patchedVertexSource = upgradeLegacyDesktopShaderSource(vertexShaderSource, true);
+            patchedFragmentSource = upgradeLegacyDesktopShaderSource(fragmentShaderSource, false);
+            vertexShaderSource = patchedVertexSource;
+            fragmentShaderSource = patchedFragmentSource;
         }
 
         compileProgram(
