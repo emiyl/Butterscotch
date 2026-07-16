@@ -258,6 +258,21 @@ static bool compileProgram(GMLShader* gmlShader, const char* name, const char* v
     return true;
 }
 
+static const char* getDesktopGLSLVersionHeader(GLVer ver) {
+#if defined(__APPLE__)
+    if (ver.major >= 4) {
+        return "#version 410\n";
+    }
+    if (ver.major >= 3) {
+        return "#version 150\n";
+    }
+#endif
+    if (ver.major >= 3) {
+        return "#version 130\n";
+    }
+    return "#version 110\n";
+}
+
 static void glInit(Renderer* renderer, DataWin* dataWin) {
     GLRenderer* gl = (GLRenderer*) renderer;
     renderer->dataWin = dataWin;
@@ -296,8 +311,8 @@ static void glInit(Renderer* renderer, DataWin* dataWin) {
                 "out vec2 vTexCoord;\nout vec4 vColor;\n%s",
                 vertHeader, baseVertexShader);
         } else {
-            vertHeader = "#version 130\n";
-            fragHeader = "#version 130\n";
+            vertHeader = getDesktopGLSLVersionHeader(ver);
+            fragHeader = vertHeader;
 
             snprintf(vertSrc, sizeof(vertSrc),
                 "%s"

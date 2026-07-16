@@ -262,6 +262,17 @@ if(PLATFORM STREQUAL "desktop")
             target_compile_definitions(butterscotch PRIVATE WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
             find_package(glfw3 CONFIG REQUIRED)
             set(BACKEND_LIBRARIES glfw opengl32 gdi32 winmm)
+        elseif(APPLE)
+            find_package(
+                glfw3
+                CONFIG REQUIRED
+                HINTS
+                    /opt/homebrew/opt/glfw
+                    /usr/local/opt/glfw
+                    $ENV{GLFW3_DIR}
+                    $ENV{GLFW3_ROOT}
+            )
+            set(BACKEND_LIBRARIES glfw)
         else()
             find_package(PkgConfig REQUIRED)
             pkg_check_modules(GLFW3 REQUIRED glfw3)
