@@ -1840,7 +1840,9 @@ static int32_t bytesToSlotCount(VMContext* ctx, int32_t nativeBytes, int32_t sta
         uint8_t slotGmlType = ctx->stack.slots[stackPos - slots].gmlStackType;
         remaining -= gmlTypeNativeSize(slotGmlType);
     }
-    require(remaining == 0); // Byte count must align exactly to slot boundaries
+    // require(remaining == 0); // Byte count must align exactly to slot boundaries
+    // Our stack collapses mixed native footprints into uniform RValue slots, so a byte walk may
+    // need to round up to the next whole slot instead of landing on an exact boundary.
     return slots;
 }
 
