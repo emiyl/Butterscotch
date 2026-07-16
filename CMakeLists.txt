@@ -518,14 +518,6 @@ elseif(PLATFORM STREQUAL "ios")
         )
     endif()
 
-    # Optional ANGLE-like frameworks shipped in this repository (OpenGL-over-Metal shim).
-    if(EXISTS "${CMAKE_SOURCE_DIR}/OpenGL/libEGL.framework/libEGL" AND EXISTS "${CMAKE_SOURCE_DIR}/OpenGL/libGLESv2.framework/libGLESv2")
-        list(APPEND BUTTERSCOTCH_IOS_LINK_ITEMS
-            "${CMAKE_SOURCE_DIR}/OpenGL/libEGL.framework/libEGL"
-            "${CMAKE_SOURCE_DIR}/OpenGL/libGLESv2.framework/libGLESv2"
-        )
-    endif()
-
     target_link_libraries(butterscotch PUBLIC ${BUTTERSCOTCH_IOS_LINK_ITEMS})
 
     option(BUTTERSCOTCH_IOS_BUILD_APP "Build a minimal iOS app bundle target" ON)
@@ -558,14 +550,6 @@ elseif(PLATFORM STREQUAL "ios")
             XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO"
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
         )
-
-        if(EXISTS "${CMAKE_SOURCE_DIR}/OpenGL/libEGL.framework/libEGL" AND EXISTS "${CMAKE_SOURCE_DIR}/OpenGL/libGLESv2.framework/libGLESv2")
-            add_custom_command(TARGET butterscotch-ios-app POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:butterscotch-ios-app>/Frameworks"
-                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/OpenGL/libEGL.framework" "$<TARGET_BUNDLE_DIR:butterscotch-ios-app>/Frameworks/libEGL.framework"
-                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/OpenGL/libGLESv2.framework" "$<TARGET_BUNDLE_DIR:butterscotch-ios-app>/Frameworks/libGLESv2.framework"
-            )
-        endif()
 
         add_custom_target(butterscotch-ipa
             COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/ipa/$<CONFIG>"
