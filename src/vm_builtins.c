@@ -576,6 +576,32 @@ static bool isInstanceScopedBuiltinVar(int16_t builtinVarId) {
     }
 }
 
+static Room* resolveBuiltinRoomTarget(Runner* runner) {
+    if (runner->currentRoom != nullptr)
+        return runner->currentRoom;
+
+    DataWin* dataWin = runner->dataWin;
+    if (dataWin == nullptr || dataWin->gen8.roomOrderCount == 0)
+        return nullptr;
+
+    int32_t roomIndex = dataWin->gen8.roomOrder[0];
+    if (roomIndex < 0 || (uint32_t) roomIndex >= dataWin->room.count)
+        return nullptr;
+
+    return &dataWin->room.rooms[roomIndex];
+}
+
+static int32_t resolveBuiltinRoomIndex(Runner* runner) {
+    if (runner->currentRoomIndex >= 0)
+        return runner->currentRoomIndex;
+
+    DataWin* dataWin = runner->dataWin;
+    if (dataWin == nullptr || dataWin->gen8.roomOrderCount == 0)
+        return -1;
+
+    return dataWin->gen8.roomOrder[0];
+}
+
 RValue VMBuiltins_getVariable(VMContext* ctx, Instance* inst, int16_t builtinVarId, const char* name, int32_t arrayIndex) {
     Runner* runner = ctx->runner;
     requireNotNull(runner);
@@ -868,31 +894,39 @@ RValue VMBuiltins_getVariable(VMContext* ctx, Instance* inst, int16_t builtinVar
 
         // Room properties
         case BUILTIN_VAR_ROOM:
-            return RValue_makeReal((GMLReal) runner->currentRoomIndex);
+            return RValue_makeReal((GMLReal) resolveBuiltinRoomIndex(runner));
         case BUILTIN_VAR_ROOM_FIRST:
             return RValue_makeReal((GMLReal) runner->dataWin->gen8.roomOrder[0]);
         case BUILTIN_VAR_ROOM_LAST:
             return RValue_makeReal((GMLReal) runner->dataWin->gen8.roomOrder[runner->dataWin->gen8.roomOrderCount - 1]);
-        case BUILTIN_VAR_ROOM_SPEED:
-            if (runner->currentRoom == nullptr)
+        case BUILTIN_VAR_ROOM_SPEED: {
+            Room* room = resolveBuiltinRoomTarget(runner);
+            if (room == nullptr)
                 return RValue_makeReal((GMLReal) runner->dataWin->gen8.gms2FPS);
 
-            return RValue_makeReal((GMLReal) runner->currentRoom->speed);
-        case BUILTIN_VAR_ROOM_WIDTH:
-            if (runner->currentRoom == nullptr)
+            return RValue_makeReal((GMLReal) room->speed);
+        }
+        case BUILTIN_VAR_ROOM_WIDTH: {
+            Room* room = resolveBuiltinRoomTarget(runner);
+            if (room == nullptr)
                 return RValue_makeReal((GMLReal) -1.0);
 
-            return RValue_makeReal((GMLReal) runner->currentRoom->width);
-        case BUILTIN_VAR_ROOM_HEIGHT:
-            if (runner->currentRoom == nullptr)
+            return RValue_makeReal((GMLReal) room->width);
+        }
+        case BUILTIN_VAR_ROOM_HEIGHT: {
+            Room* room = resolveBuiltinRoomTarget(runner);
+            if (room == nullptr)
                 return RValue_makeReal((GMLReal) -1.0);
 
-            return RValue_makeReal((GMLReal) runner->currentRoom->height);
-        case BUILTIN_VAR_ROOM_PERSISTENT:
-            if (runner->currentRoom == nullptr)
+            return RValue_makeReal((GMLReal) room->height);
+        }
+        case BUILTIN_VAR_ROOM_PERSISTENT: {
+            Room* room = resolveBuiltinRoomTarget(runner);
+            if (room == nullptr)
                 return RValue_makeReal((GMLReal) -1.0);
 
-            return RValue_makeBool(runner->currentRoom->persistent);
+            return RValue_makeBool(room->persistent);
+        }
 
         // View properties
         case BUILTIN_VAR_VIEW_CURRENT:
@@ -1696,18 +1730,30 @@ void VMBuiltins_setVariable(VMContext* ctx, Instance* inst, int16_t builtinVarId
         case BUILTIN_VAR_ROOM:
             runner->pendingRoom = RValue_toInt32(val);
             return;
-        case BUILTIN_VAR_ROOM_PERSISTENT:
-            runner->currentRoom->persistent = RValue_toBool(val);
+        case BUILTIN_VAR_ROOM_PERSISTENT: {
+            Room* room = resolveBuiltinRoomTarget(runner);
+            if (room == nullptr) break;
+            room->persistent = RValue_toBool(val);
             return;
-        case BUILTIN_VAR_ROOM_WIDTH:
-            runner->currentRoom->width = (uint32_t) RValue_toInt32(val);
+        }
+        case BUILTIN_VAR_ROOM_WIDTH: {
+            Room* room = resolveBuiltinRoomTarget(runner);
+            if (room == nullptr) break;
+            room->width = (uint32_t) RValue_toInt32(val);
             return;
-        case BUILTIN_VAR_ROOM_HEIGHT:
-            runner->currentRoom->height = (uint32_t) RValue_toInt32(val);
+        }
+        case BUILTIN_VAR_ROOM_HEIGHT: {
+            Room* room = resolveBuiltinRoomTarget(runner);
+            if (room == nullptr) break;
+            room->height = (uint32_t) RValue_toInt32(val);
             return;
-        case BUILTIN_VAR_ROOM_SPEED:
-            runner->currentRoom->speed = (uint32_t) RValue_toInt32(val);
+        }
+        case BUILTIN_VAR_ROOM_SPEED: {
+            Room* room = resolveBuiltinRoomTarget(runner);
+            if (room == nullptr) break;
+            room->speed = (uint32_t) RValue_toInt32(val);
             return;
+        }
 
         // argument[N] - array-style write to script arguments
         case BUILTIN_VAR_ARGUMENT:
