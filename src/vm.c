@@ -255,12 +255,17 @@ static void cowForkSlotForModificationIfNeeded(VMContext* ctx, RValue* slot) {
     slot->ownsReference = true;
 }
 
+
 // Write array[index] = val with CoW semantics. Always makes an independent copy of val, caller retains ownership and must RValue_free(&val) when done.
 // `slot` is the RValue* holding the array (e.g. &globalVars[id], &inst->selfVars[..].value, &localVars[slot]).
 // Returns the (possibly newly-forked) GMLArray* now in *slot.
 static GMLArray* VM_arraySetWithCoW(VMContext* ctx, RValue* slot, int32_t index, RValue val) {
     require(slot != nullptr);
     requireMessageFormatted(__FILE__, __LINE__, index >= 0, "Trying to write to an array using a negative index! Index: %d", index);
+
+    // Detach early: `val` may be a weak alias to data inside the current array slot.
+    // CoW can decRef/free that array before the final write, so we must not keep a borrowed pointer.
+    RValue detachedVal = RValue_makeIndependent(val);
 
     void* intendedOwner;
 #if IS_WAD17_OR_HIGHER_ENABLED
@@ -277,7 +282,8 @@ static GMLArray* VM_arraySetWithCoW(VMContext* ctx, RValue* slot, int32_t index,
         fresh->owner = intendedOwner;
         *slot = RValue_makeArray(fresh);
         GMLArray_growTo(fresh, index + 1);
-        GMLArray_set(fresh, index, val);
+        GMLArray_set(fresh, index, detachedVal);
+        RValue_free(&detachedVal);
         return fresh;
     }
 
@@ -299,7 +305,8 @@ static GMLArray* VM_arraySetWithCoW(VMContext* ctx, RValue* slot, int32_t index,
     }
 
     // Case 3: Write!
-    GMLArray_set(arr, index, val);
+    GMLArray_set(arr, index, detachedVal);
+    RValue_free(&detachedVal);
     return arr;
 }
 
@@ -1551,8 +1558,10 @@ static void handleRem(VMContext* ctx, uint32_t instr) {
     RValue b = stackPop(ctx);
     RValue a = stackPop(ctx);
     int64_t divisor = RValue_toInt64(b);
-    requireMessageFormatted(__FILE__, __LINE__, divisor != 0, "VM: [%s] DoRem :: Divide by zero", ctx->currentCodeName);
-    int64_t result = RValue_toInt64(a) / divisor;
+    int64_t result = 0;
+    if (divisor != 0) {
+        result = RValue_toInt64(a) % divisor;
+    }
     RValue_free(&a);
     RValue_free(&b);
     stackPushTyped(ctx, RValue_makeInt64(result), instrType2(instr));
