@@ -3638,7 +3638,7 @@ static RValue builtin_camera_set_view_angle(VMContext* ctx, RValue* args, int32_
     if (2 > argCount) return RValue_makeUndefined();
     Runner* runner = ctx->runner;
     GMLCamera* camera = Runner_getCameraById(runner, RValue_toInt32(args[0]));
-    if (camera != nullptr) { 
+    if (camera != nullptr) {
         camera->viewAngle = (float) RValue_toReal(args[1]);
         Runner_updateCameraViewSimple(camera);
     }
@@ -3706,7 +3706,7 @@ static RValue builtin_camera_create_view(VMContext* ctx, RValue* args, int32_t a
     if (argCount > 9) camera->borderY = (uint32_t) RValue_toInt32(args[9]);
 
     Runner_updateCameraViewSimple(camera);
-    
+
     return RValue_makeReal(id);
 }
 
@@ -10183,6 +10183,31 @@ static RValue builtin_draw_self(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE
     return RValue_makeUndefined();
 }
 
+// draw_point(x, y)
+static RValue builtin_draw_point(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = ctx->runner;
+    if (runner->renderer == nullptr) return RValue_makeUndefined();
+    float x = (float) RValue_toReal(args[0]);
+    float y = (float) RValue_toReal(args[1]);
+    if (runner->applyOffsetForPrimitives) { x += 1.0f; y += 1.0f; }
+    runner->renderer->vtable->drawRectangle(runner->renderer, x, y, x + 1.0f, y + 1.0f,
+        runner->renderer->drawColor, runner->renderer->drawAlpha, false);
+    return RValue_makeUndefined();
+}
+
+// draw_point_color(x, y, col)
+static RValue builtin_draw_point_color(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = ctx->runner;
+    if (runner->renderer == nullptr) return RValue_makeUndefined();
+    float x = (float) RValue_toReal(args[0]);
+    float y = (float) RValue_toReal(args[1]);
+    uint32_t col = (uint32_t) RValue_toInt32(args[2]);
+    if (runner->applyOffsetForPrimitives) { x += 1.0f; y += 1.0f; }
+    runner->renderer->vtable->drawRectangle(runner->renderer, x, y, x + 1.0f, y + 1.0f,
+        col, runner->renderer->drawAlpha, false);
+    return RValue_makeUndefined();
+}
+
 // draw_line(x1, y1, x2, y2)
 static RValue builtin_draw_line(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
     Runner* runner = ctx->runner;
@@ -16207,7 +16232,7 @@ static RValue builtin_sprite_get_info(VMContext* ctx, RValue* args, int32_t argC
         Instance* frame = Runner_createStruct(ctx->runner);
         int32_t idx = sprite->tpagIndices[i];
         TexturePageItem* tpagItem = &ctx->dataWin->tpag.items[idx];
-        
+
         VM_structSetAndFreeVal(ctx, frame, "w", RValue_makeReal(tpagItem->boundingWidth), -1);
         VM_structSetAndFreeVal(ctx, frame, "h", RValue_makeReal(tpagItem->boundingHeight), -1);
         VM_structSetAndFreeVal(ctx, frame, "x_offset", RValue_makeReal(tpagItem->targetX), -1);
@@ -16219,7 +16244,7 @@ static RValue builtin_sprite_get_info(VMContext* ctx, RValue* args, int32_t argC
         VM_structSetAndFreeVal(ctx, frame, "crop_width", RValue_makeReal(tpagItem->targetWidth), -1);
         VM_structSetAndFreeVal(ctx, frame, "crop_height", RValue_makeReal(tpagItem->targetHeight), -1);
         VM_structSetAndFreeVal(ctx, frame, "texture", RValue_makeReal(idx), -1);
-        
+
         *GMLArray_slot(frames, (int32_t)i) = RValue_makeStructAndIncRef(frame);
     }
     VM_structSetAndFreeVal(ctx, ret, "frames", RValue_makeArray(frames), -1);
@@ -16341,7 +16366,7 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "matrix_build_projection_ortho", builtin_matrix_build_projection_ortho);
     VM_registerBuiltin(ctx, "matrix_build_projection_perspective_fov", builtin_matrix_build_projection_perspective_fov);
     VM_registerBuiltin(ctx, "matrix_get", builtin_matrix_get);
-    VM_registerBuiltin(ctx, "matrix_set", builtin_matrix_set);    
+    VM_registerBuiltin(ctx, "matrix_set", builtin_matrix_set);
     // Random
     VM_registerBuiltin(ctx, "random", builtin_random);
     VM_registerBuiltin(ctx, "random_range", builtin_random_range);
@@ -16870,6 +16895,9 @@ void VMBuiltins_registerAll(VMContext* ctx) {
         VM_registerBuiltin(ctx, "background_name", builtin_sprite_get_name);
     }
     VM_registerBuiltin(ctx, "draw_self", builtin_draw_self);
+    VM_registerBuiltin(ctx, "draw_point", builtin_draw_point);
+    VM_registerBuiltin(ctx, "draw_point_color", builtin_draw_point_color);
+    VM_registerBuiltin(ctx, "draw_point_colour", builtin_draw_point_color);
     VM_registerBuiltin(ctx, "draw_line", builtin_draw_line);
     VM_registerBuiltin(ctx, "draw_line_colour", builtin_draw_line_colour);
     VM_registerBuiltin(ctx, "draw_line_color", builtin_draw_line_colour); // alt-spelling (used in Undertale)
