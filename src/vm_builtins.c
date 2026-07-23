@@ -224,6 +224,22 @@ static bool isValidAlarmIndex(int alarmIndex) {
     return alarmIndex >= 0 && GML_ALARM_COUNT > alarmIndex;
 }
 
+static Room* resolveRoomForBuiltinAccess(Runner* runner) {
+    if (runner->currentRoom != nullptr) return runner->currentRoom;
+
+    DataWin* dataWin = runner->dataWin;
+    if (dataWin == nullptr || dataWin->room.count == 0) return nullptr;
+
+    int32_t roomIndex = runner->pendingRoom;
+    if (roomIndex < 0) {
+        if (dataWin->gen8.roomOrderCount <= 0) return nullptr;
+        roomIndex = dataWin->gen8.roomOrder[0];
+    }
+
+    if (roomIndex < 0 || (uint32_t) roomIndex >= dataWin->room.count) return nullptr;
+    return &dataWin->room.rooms[roomIndex];
+}
+
 // Sorted (strcmp-order, LC_ALL=C) table of built-in variable names -> enum IDs.
 // We use bsearch instead of a HashMap because we don't have *that* many builtin var entries, so it is faster to use bsearch than a HashMap.
 // IMPORTANT: Entries MUST stay sorted by name for bsearch to work!
@@ -874,8 +890,11 @@ RValue VMBuiltins_getVariable(VMContext* ctx, Instance* inst, int16_t builtinVar
         case BUILTIN_VAR_ROOM_LAST:
             return RValue_makeReal((GMLReal) runner->dataWin->gen8.roomOrder[runner->dataWin->gen8.roomOrderCount - 1]);
         case BUILTIN_VAR_ROOM_SPEED:
-            if (runner->currentRoom == nullptr)
+            if (runner->currentRoom == nullptr) {
+                Room* room = resolveRoomForBuiltinAccess(runner);
+                if (room != nullptr) return RValue_makeReal((GMLReal) room->speed);
                 return RValue_makeReal((GMLReal) runner->dataWin->gen8.gms2FPS);
+            }
 
             return RValue_makeReal((GMLReal) runner->currentRoom->speed);
         case BUILTIN_VAR_ROOM_WIDTH:
@@ -1696,18 +1715,28 @@ void VMBuiltins_setVariable(VMContext* ctx, Instance* inst, int16_t builtinVarId
         case BUILTIN_VAR_ROOM:
             runner->pendingRoom = RValue_toInt32(val);
             return;
-        case BUILTIN_VAR_ROOM_PERSISTENT:
-            runner->currentRoom->persistent = RValue_toBool(val);
+        case BUILTIN_VAR_ROOM_PERSISTENT: {
+            Room* room = resolveRoomForBuiltinAccess(runner);
+            if (room != nullptr) room->persistent = RValue_toBool(val);
             return;
-        case BUILTIN_VAR_ROOM_WIDTH:
-            runner->currentRoom->width = (uint32_t) RValue_toInt32(val);
+        }
+        case BUILTIN_VAR_ROOM_WIDTH: {
+            Room* room = resolveRoomForBuiltinAccess(runner);
+            if (room != nullptr) room->width = (uint32_t) RValue_toInt32(val);
             return;
-        case BUILTIN_VAR_ROOM_HEIGHT:
-            runner->currentRoom->height = (uint32_t) RValue_toInt32(val);
+        }
+        case BUILTIN_VAR_ROOM_HEIGHT: {
+            Room* room = resolveRoomForBuiltinAccess(runner);
+            if (room != nullptr) room->height = (uint32_t) RValue_toInt32(val);
             return;
-        case BUILTIN_VAR_ROOM_SPEED:
-            runner->currentRoom->speed = (uint32_t) RValue_toInt32(val);
+        }
+        case BUILTIN_VAR_ROOM_SPEED: {
+            Room* room = resolveRoomForBuiltinAccess(runner);
+            if (room != nullptr) room->speed = (uint32_t) RValue_toInt32(val);
+            // Keep pre-room fallback reads consistent if scripts touch room_speed before room init.
+            if (runner->currentRoom == nullptr) runner->dataWin->gen8.gms2FPS = (float) RValue_toReal(val);
             return;
+        }
 
         // argument[N] - array-style write to script arguments
         case BUILTIN_VAR_ARGUMENT:
