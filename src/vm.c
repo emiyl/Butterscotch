@@ -1,5 +1,5 @@
 #include "vm.h"
-#include "vm_builtins.h"
+#include "vm_builtins/vm_builtins.h"
 #include "instance.h"
 #include "runner.h"
 #include "binary_utils.h"

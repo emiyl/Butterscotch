@@ -1,8 +1,8 @@
 #ifndef _BS_VM_BUILTINS_H_
 #define _BS_VM_BUILTINS_H_
 
-#include "common.h"
-#include "vm.h"
+#include "../common.h"
+#include "../vm.h"
 
 // ===[ Built-in Variable ID Enum ]===
 typedef enum {

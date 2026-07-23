@@ -98,14 +98,15 @@ if(PLATFORM STREQUAL "web-meta")
     )
 else()
     file(GLOB SOURCES src/*.c)
+    file(GLOB VM_BUILTINS_SOURCES src/vm_builtins/*.c)
 endif()
 # Platform specific files builds
 file(GLOB PLATFORM_SOURCES src/${PLATFORM}/*.c)
 
 if(PLATFORM STREQUAL "android")
-    add_library(butterscotch SHARED ${SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES})
+    add_library(butterscotch SHARED ${SOURCES} ${VM_BUILTINS_SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES})
 else()
-    add_executable(butterscotch ${SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES})
+    add_executable(butterscotch ${SOURCES} ${VM_BUILTINS_SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES})
 endif()
 
 target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src)
