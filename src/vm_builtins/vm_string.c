@@ -1,4 +1,4 @@
-#include "string.h"
+#include "vm_string.h"
 
 RValue builtin_string_length(MAYBE_UNUSED VMContext* ctx, RValue* args, int32_t argCount) {
     if (1 > argCount) return RValue_makeInt32(0);
