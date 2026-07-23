@@ -5,7 +5,6 @@
 
 #include "../common.h"
 #include "../vm.h"
-#include "../rvalue.h"
 #include "vm_common.h"
 
 RValue builtin_floor(MAYBE_UNUSED VMContext* ctx, RValue* args, int32_t argCount);

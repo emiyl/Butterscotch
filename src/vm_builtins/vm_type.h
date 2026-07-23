@@ -5,7 +5,6 @@
 
 #include "../common.h"
 #include "../vm.h"
-#include "../rvalue.h"
 
 RValue builtin_real(MAYBE_UNUSED VMContext* ctx, RValue* args, int32_t argCount);
 RValue builtin_typeof(MAYBE_UNUSED VMContext* ctx, RValue* args, int32_t argCount);

@@ -1,5 +1,7 @@
 #include "vm_common.h"
 
+// Math
+
 // place_empty(x, y) - returns true if no instance overlaps at position (x, y), checking ALL instances (not just solid)
 bool placeEmptyAt(Runner* runner, Instance* caller, GMLReal testX, GMLReal testY) {
     GMLReal savedX = caller->x;
@@ -166,4 +168,33 @@ void moveBounceCommon(Runner* runner, Instance* inst, bool advanced, bool useall
         }
         Instance_computeSpeedFromComponents(inst);
     }
+}
+
+// Matrix
+
+bool rvalueIsMatrix(RValue rv) {
+    if (rv.type != RVALUE_ARRAY) return false;
+    if (GMLArray_length1D(rv.array) != 16) return false;
+    repeat (16, i) {
+        RValueType type = (RValueType)(GMLArray_slot(rv.array, i)->type);
+        if (type != RVALUE_REAL && type != RVALUE_INT32 && type != RVALUE_INT64)
+            return false;
+    }
+    return true;
+}
+
+bool matrixFromGml(Matrix4f *mat, GMLArray *arr) {
+    if (GMLArray_length1D(arr) != 16) return false;
+    repeat (16, i) {
+        mat->m[i] = RValue_toReal(*GMLArray_slot(arr, i));
+    }
+    return true;
+}
+
+GMLArray *matrixToGml(int32_t wadVersion, const Matrix4f *mat) {
+    GMLArray *out = GMLArray_create(wadVersion, 4 * 4);
+    repeat (16, i) {
+        *GMLArray_slot(out, i) = RValue_makeReal(mat->m[i]);
+    }
+    return out;
 }
