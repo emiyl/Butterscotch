@@ -57,6 +57,20 @@ static int gmlTypeNativeSize(uint8_t gmlType) {
     }
 }
 
+static const char* gmlTypeName(uint8_t gmlType) {
+    switch (gmlType) {
+        case GML_TYPE_DOUBLE:   return "DOUBLE";
+        case GML_TYPE_FLOAT:    return "FLOAT";
+        case GML_TYPE_INT32:    return "INT32";
+        case GML_TYPE_INT64:    return "INT64";
+        case GML_TYPE_BOOL:     return "BOOL";
+        case GML_TYPE_VARIABLE: return "VARIABLE";
+        case GML_TYPE_STRING:   return "STRING";
+        case GML_TYPE_INT16:    return "INT16";
+        default:                return "UNKNOWN";
+    }
+}
+
 static void stackPush(VMContext* ctx, RValue val) {
     require(VM_STACK_SIZE > ctx->stack.top);
 #ifdef ENABLE_VM_TRACING
@@ -1844,7 +1858,7 @@ static int32_t bytesToSlotCount(VMContext* ctx, int32_t nativeBytes, int32_t sta
     return slots;
 }
 
-static void handleDup(VMContext* ctx, uint32_t instr) {
+static void handleDup(VMContext* ctx, uint32_t instr, uint32_t instrAddr) {
     uint16_t operand = (uint16_t)(instr & 0xFFFF);
     uint8_t type1 = instrType1(instr);
     int32_t typeSize = gmlTypeNativeSize(type1);
@@ -1853,17 +1867,14 @@ static void handleDup(VMContext* ctx, uint32_t instr) {
     // Swap mode (WAD17+): bit 15 of operand is set.
     // The Dup instruction doubles as a stack rotation when bit 15 is set.
     // It takes the top N items and moves them below the next M items.
-    // Bits 0-10: top group size (in native type units)
-    // Bits 11-14: bottom group size (in native type units)
+    // Bits 0-10: top group size (in stack slots)
+    // Bits 11-14: bottom group size (in stack slots)
     if (IS_WAD17_OR_HIGHER(ctx) && (operand & 0x8000) != 0) {
-        int32_t topNativeCount = operand & 0x7FF;
-        int32_t bottomNativeCount = (operand >> 11) & 0xF;
-        int32_t topBytes = topNativeCount * typeSize;
-        int32_t bottomBytes = bottomNativeCount * typeSize;
-
-        // Convert byte counts to slot counts
-        int32_t topSlots = bytesToSlotCount(ctx, topBytes, ctx->stack.top);
-        int32_t bottomSlots = bytesToSlotCount(ctx, bottomBytes, ctx->stack.top - topSlots);
+        int32_t topSlots = operand & 0x7FF;
+        int32_t bottomSlots = (operand >> 11) & 0xF;
+        requireMessageFormatted(__FILE__, __LINE__, topSlots >= 0 && bottomSlots >= 0, "VM: Dup swap got negative group sizes in %s at offset %u [instr=0x%08X topSlots=%d bottomSlots=%d operand=0x%04X type1=0x%X(%s)]", ctx->currentCodeName, instrAddr, instr, topSlots, bottomSlots, operand, type1, gmlTypeName(type1));
+        requireMessageFormatted(__FILE__, __LINE__, ctx->stack.top >= topSlots + bottomSlots, "VM: Dup swap stack underflow in %s at offset %u [instr=0x%08X stackTop=%d topSlots=%d bottomSlots=%d operand=0x%04X type1=0x%X(%s)]", ctx->currentCodeName, instrAddr, instr, ctx->stack.top, topSlots, bottomSlots, operand, type1, gmlTypeName(type1));
+        requireMessageFormatted(__FILE__, __LINE__, topSlots <= 32, "VM: Dup swap temp buffer overflow risk in %s at offset %u [instr=0x%08X topSlots=%d operand=0x%04X type1=0x%X(%s)]", ctx->currentCodeName, instrAddr, instr, topSlots, operand, type1, gmlTypeName(type1));
 
         int32_t totalSlots = topSlots + bottomSlots;
         int32_t baseIdx = ctx->stack.top - totalSlots;
@@ -3224,7 +3235,7 @@ static RValue executeLoop(VMContext* ctx) {
 
             // Duplicate
             case OP_DUP:
-                handleDup(ctx, instr);
+                handleDup(ctx, instr, instrAddr);
                 break;
 
             // Branches
