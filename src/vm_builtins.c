@@ -14633,7 +14633,7 @@ static RValue builtin_path_duplicate(VMContext* ctx, RValue* args, int32_t argCo
 
     uint32_t newIdx = pc->count;
 
-    GamePath* paths = safeRealloc(
+    GamePath* paths = (GamePath*)safeRealloc(
         pc->paths,
         (newIdx + 1) * sizeof(GamePath)
     );
@@ -14648,7 +14648,7 @@ static RValue builtin_path_duplicate(VMContext* ctx, RValue* args, int32_t argCo
     memset(newPath, 0, sizeof(GamePath));
 
     // Copy basic properties
-    newPath->name = safeStrdup(source.name);
+    newPath->name = (char*)safeStrdup(source.name);
 
     if (source.name != nullptr && newPath->name == nullptr)
         return RValue_makeInt32(-1);
@@ -14662,7 +14662,7 @@ static RValue builtin_path_duplicate(VMContext* ctx, RValue* args, int32_t argCo
 
     // Copy external points
     if (source.pointCount > 0) {
-        newPath->points = safeMalloc(
+        newPath->points = (PathPoint*)safeMalloc(
             source.pointCount * sizeof(PathPoint)
         );
 
@@ -14681,7 +14681,7 @@ static RValue builtin_path_duplicate(VMContext* ctx, RValue* args, int32_t argCo
 
     // Copy internal points
     if (source.internalPointCount > 0) {
-        newPath->internalPoints = safeMalloc(
+        newPath->internalPoints = (InternalPathPoint*)safeMalloc(
             source.internalPointCount * sizeof(InternalPathPoint)
         );
 
