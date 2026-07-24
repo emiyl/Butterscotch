@@ -14497,7 +14497,7 @@ static RValue builtin_path_add_point(VMContext* ctx, RValue* args, int32_t argCo
     if (4 > argCount) return RValue_makeUndefined();
     GamePath* p = getPath(ctx->runner, RValue_toInt32(args[0]));
     if (p == nullptr) return RValue_makeUndefined();
-    PathPoint* pts = (PathPoint*) realloc(p->points, (p->pointCount + 1) * sizeof(PathPoint));
+    PathPoint* pts = (PathPoint*) safeRealloc(p->points, (p->pointCount + 1) * sizeof(PathPoint));
     if (pts == nullptr) return RValue_makeUndefined();
     p->points = pts;
     pts[p->pointCount].x = (float) RValue_toReal(args[1]);
@@ -14529,7 +14529,7 @@ static RValue builtin_path_insert_point(VMContext* ctx, RValue* args, int32_t ar
     if (p == nullptr) return RValue_makeUndefined();
     int32_t pointIndex = RValue_toInt32(args[1]);
     if (0 > pointIndex || (uint32_t) pointIndex > p->pointCount) return RValue_makeUndefined();
-    PathPoint* pts = (PathPoint*) realloc(p->points, (p->pointCount + 1) * sizeof(PathPoint));
+    PathPoint* pts = (PathPoint*) safeRealloc(p->points, (p->pointCount + 1) * sizeof(PathPoint));
     if (pts == nullptr) return RValue_makeUndefined();
     p->points = pts;
     memmove(&pts[pointIndex + 1], &pts[pointIndex], (p->pointCount - pointIndex) * sizeof(PathPoint));
@@ -14575,7 +14575,7 @@ static RValue builtin_path_append(VMContext* ctx, RValue* args, int32_t argCount
     GamePath* p = getPath(ctx->runner, RValue_toInt32(args[0]));
     GamePath* other = getPath(ctx->runner, RValue_toInt32(args[1]));
     if (p == nullptr || other == nullptr) return RValue_makeUndefined();
-    PathPoint* pts = (PathPoint*) realloc(p->points, (p->pointCount + other->pointCount) * sizeof(PathPoint));
+    PathPoint* pts = (PathPoint*) safeRealloc(p->points, (p->pointCount + other->pointCount) * sizeof(PathPoint));
     if (pts == nullptr) return RValue_makeUndefined();
     p->points = pts;
     memcpy(&pts[p->pointCount], other->points, other->pointCount * sizeof(PathPoint));
@@ -14591,12 +14591,12 @@ static RValue builtin_path_assign(VMContext* ctx, RValue* args, int32_t argCount
     GamePath* other = getPath(ctx->runner, RValue_toInt32(args[1]));
     if (p == nullptr || other == nullptr) return RValue_makeUndefined();
     free(p->points);
-    p->points = (PathPoint*) malloc(other->pointCount * sizeof(PathPoint));
+    p->points = (PathPoint*) safeMalloc(other->pointCount * sizeof(PathPoint));
     if (p->points == nullptr) return RValue_makeUndefined();
     memcpy(p->points, other->points, other->pointCount * sizeof(PathPoint));
     p->pointCount = other->pointCount;
     free(p->internalPoints);
-    p->internalPoints = (InternalPathPoint*) malloc(other->internalPointCount * sizeof(InternalPathPoint));
+    p->internalPoints = (InternalPathPoint*) safeMalloc(other->internalPointCount * sizeof(InternalPathPoint));
     if (p->internalPoints == nullptr) return RValue_makeUndefined();
     memcpy(p->internalPoints, other->internalPoints, other->internalPointCount * sizeof(InternalPathPoint));
     p->internalPointCount = other->internalPointCount;
@@ -14633,7 +14633,7 @@ static RValue builtin_path_duplicate(VMContext* ctx, RValue* args, int32_t argCo
 
     uint32_t newIdx = pc->count;
 
-    GamePath* paths = realloc(
+    GamePath* paths = safeRealloc(
         pc->paths,
         (newIdx + 1) * sizeof(GamePath)
     );
@@ -14662,7 +14662,7 @@ static RValue builtin_path_duplicate(VMContext* ctx, RValue* args, int32_t argCo
 
     // Copy external points
     if (source.pointCount > 0) {
-        newPath->points = malloc(
+        newPath->points = safeMalloc(
             source.pointCount * sizeof(PathPoint)
         );
 
@@ -14681,7 +14681,7 @@ static RValue builtin_path_duplicate(VMContext* ctx, RValue* args, int32_t argCo
 
     // Copy internal points
     if (source.internalPointCount > 0) {
-        newPath->internalPoints = malloc(
+        newPath->internalPoints = safeMalloc(
             source.internalPointCount * sizeof(InternalPathPoint)
         );
 
