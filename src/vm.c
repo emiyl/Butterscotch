@@ -57,6 +57,7 @@ static int gmlTypeNativeSize(uint8_t gmlType) {
     }
 }
 
+#if IS_WAD17_OR_HIGHER_ENABLED
 static const char* gmlTypeName(uint8_t gmlType) {
     switch (gmlType) {
         case GML_TYPE_DOUBLE:   return "DOUBLE";
@@ -70,6 +71,7 @@ static const char* gmlTypeName(uint8_t gmlType) {
         default:                return "UNKNOWN";
     }
 }
+#endif
 
 static void stackPush(VMContext* ctx, RValue val) {
     require(VM_STACK_SIZE > ctx->stack.top);
@@ -1858,7 +1860,7 @@ static int32_t bytesToSlotCount(VMContext* ctx, int32_t nativeBytes, int32_t sta
     return slots;
 }
 
-static void handleDup(VMContext* ctx, uint32_t instr, uint32_t instrAddr) {
+static void handleDup(VMContext* ctx, uint32_t instr, MAYBE_UNUSED uint32_t instrAddr) {
     uint16_t operand = (uint16_t)(instr & 0xFFFF);
     uint8_t type1 = instrType1(instr);
     int32_t typeSize = gmlTypeNativeSize(type1);
