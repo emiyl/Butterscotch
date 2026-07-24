@@ -6332,6 +6332,286 @@ STUB_RETURN_UNDEFINED(steam_file_write)
 STUB_RETURN_UNDEFINED(steam_file_read)
 STUB_RETURN_ZERO(steam_get_persona_name)
 
+// Video playback stubs. Desktop currently has no video backend, so these keep
+// GML logic running without unknown-function errors.
+typedef struct {
+    bool isOpen;
+    bool isLooping;
+    bool isPaused;
+    bool completionEventQueued;
+    Instance* ownerInstance;
+    uint64_t startNanos;
+    uint64_t pausedAtNanos;
+    uint64_t totalPausedNanos;
+    double durationSeconds;
+} VideoStubState;
+
+static VideoStubState videoStubState = {0};
+
+enum {
+    VIDEO_STUB_STATUS_NONE = 0,
+    VIDEO_STUB_STATUS_PLAYING = 2,
+    VIDEO_STUB_STATUS_PAUSED = 3,
+};
+
+static double videoStubGetPositionSeconds(void) {
+    if (!videoStubState.isOpen) return 0.0;
+    uint64_t now = videoStubState.isPaused ? videoStubState.pausedAtNanos : nowNanos();
+    uint64_t elapsed = 0;
+    if (now > videoStubState.startNanos && now > videoStubState.totalPausedNanos) {
+        elapsed = now - videoStubState.startNanos - videoStubState.totalPausedNanos;
+    }
+    double seconds = (double) elapsed / 1000000000.0;
+    if (seconds < 0.0) seconds = 0.0;
+    if (videoStubState.durationSeconds > 0.0) {
+        if (videoStubState.isLooping) {
+            seconds = fmod(seconds, videoStubState.durationSeconds);
+        } else if (seconds > videoStubState.durationSeconds) {
+            seconds = videoStubState.durationSeconds;
+        }
+    }
+    return seconds;
+}
+
+static int32_t videoStubGetMusicHandleForInstance(VMContext* ctx, Instance* target) {
+    if (ctx == nullptr || target == nullptr) return -1;
+    ptrdiff_t musFileSlot = shgeti(ctx->varNameMap, "_mus_file");
+    if (musFileSlot < 0) return -1;
+
+    int32_t musFileVarId = ctx->varNameMap[musFileSlot].value;
+    RValue musFile = Instance_getSelfVar(target, musFileVarId);
+    if (musFile.type != RVALUE_ARRAY || musFile.array == nullptr) return -1;
+    if (GMLArray_length1D(musFile.array) <= 1) return -1;
+
+    RValue* streamHandle = GMLArray_slot(musFile.array, 1);
+    if (streamHandle == nullptr) return -1;
+    return RValue_toInt32(*streamHandle);
+}
+
+static int32_t videoStubGetMusicHandle(VMContext* ctx) {
+    // Prefer the recorded cutscene owner so delayed helper objects still target the right stream.
+    if (videoStubState.ownerInstance != nullptr && !videoStubState.ownerInstance->destroyed) {
+        int32_t handle = videoStubGetMusicHandleForInstance(ctx, videoStubState.ownerInstance);
+        if (handle >= 0) return handle;
+    }
+    return videoStubGetMusicHandleForInstance(ctx, ctx != nullptr ? ctx->currentInstance : nullptr);
+}
+
+static AudioSystem* videoStubGetAudioSystem(VMContext* ctx) {
+    if (ctx == nullptr || ctx->runner == nullptr) return nullptr;
+    return ctx->runner->audioSystem;
+}
+
+static AudioSystemVtable* videoStubGetAudioVtable(VMContext* ctx) {
+    AudioSystem* audio = videoStubGetAudioSystem(ctx);
+    if (audio == nullptr) return nullptr;
+    return audio->vtable;
+}
+
+static double videoStubGetMusicLengthSeconds(VMContext* ctx) {
+    AudioSystem* audio = videoStubGetAudioSystem(ctx);
+    AudioSystemVtable* vtable = videoStubGetAudioVtable(ctx);
+    if (audio == nullptr || vtable == nullptr || vtable->getSoundLength == nullptr) return 0.0;
+
+    int32_t handle = videoStubGetMusicHandle(ctx);
+    if (handle < 0) return 0.0;
+    float len = vtable->getSoundLength(audio, handle);
+    if (len <= 0.0f) return 0.0;
+    return (double) len;
+}
+
+static double videoStubGetMusicPositionSeconds(VMContext* ctx) {
+    AudioSystem* audio = videoStubGetAudioSystem(ctx);
+    AudioSystemVtable* vtable = videoStubGetAudioVtable(ctx);
+    if (audio == nullptr || vtable == nullptr || vtable->getTrackPosition == nullptr) return 0.0;
+
+    int32_t handle = videoStubGetMusicHandle(ctx);
+    if (handle < 0) return 0.0;
+    float pos = vtable->getTrackPosition(audio, handle);
+    if (pos < 0.0f) return 0.0;
+    return (double) pos;
+}
+
+static int32_t videoStubFindObjectIndexByName(VMContext* ctx, const char* objectName) {
+    if (ctx == nullptr || ctx->dataWin == nullptr || objectName == nullptr) return -1;
+    repeat(ctx->dataWin->objt.count, i) {
+        const char* name = ctx->dataWin->objt.objects[i].name;
+        if (name != nullptr && strcmp(name, objectName) == 0) {
+            return (int32_t) i;
+        }
+    }
+    return -1;
+}
+
+static RValue builtin_video_open(VMContext* ctx, RValue* args, int32_t argCount) {
+    logStubbedFunction(ctx, "video_open");
+    // Keep a deterministic pseudo-video timeline so chapter scripts can progress.
+    videoStubState.isOpen = true;
+    videoStubState.isPaused = false;
+    videoStubState.isLooping = false;
+    videoStubState.completionEventQueued = false;
+    videoStubState.ownerInstance = ctx != nullptr ? ctx->currentInstance : nullptr;
+    videoStubState.startNanos = nowNanos();
+    videoStubState.pausedAtNanos = 0;
+    videoStubState.totalPausedNanos = 0;
+    videoStubState.durationSeconds = 16.0;
+
+    if (argCount > 0 && args[0].type == RVALUE_STRING && args[0].string != nullptr) {
+        const char* path = args[0].string;
+        if (strstr(path, "ch5_intro") != nullptr) {
+            // Chapter 5 intro timing works best with a near-cutscene-length default.
+            videoStubState.durationSeconds = 15.0;
+        }
+    }
+
+    // Match room script expectation: once opened, the video object enables its draw path.
+    if (ctx->currentInstance != nullptr) {
+        variableInstanceSetOn(ctx, ctx->currentInstance, "_video_enabled", RValue_makeBool(true), "video_open");
+    }
+
+    return RValue_makeBool(true);
+}
+
+static RValue builtin_video_enable_loop(VMContext* ctx, RValue* args, int32_t argCount) {
+    logStubbedFunction(ctx, "video_enable_loop");
+    if (argCount > 0) {
+        videoStubState.isLooping = RValue_toBool(args[0]);
+    }
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_video_get_format(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "video_get_format");
+    // 0 == single-surface path expected by room_dw_garden_video Draw event.
+    return RValue_makeReal(0.0);
+}
+
+static RValue builtin_video_get_duration(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "video_get_duration");
+    if (!videoStubState.isOpen) return RValue_makeReal(0.0);
+
+    // Prefer the paired music stream length to keep Chapter 5 A/V sync logic stable.
+    double musicLen = videoStubGetMusicLengthSeconds(ctx);
+    if (musicLen > 0.0) return RValue_makeReal(musicLen);
+
+    return RValue_makeReal(videoStubState.durationSeconds);
+}
+
+static RValue builtin_video_get_status(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "video_get_status");
+    if (!videoStubState.isOpen) return RValue_makeReal(VIDEO_STUB_STATUS_NONE);
+
+    if (!videoStubState.isLooping && !videoStubState.completionEventQueued && ctx != nullptr && ctx->runner != nullptr) {
+        double duration = videoStubGetMusicLengthSeconds(ctx);
+        if (duration <= 0.0) duration = videoStubState.durationSeconds;
+        if (duration > 0.0) {
+            double position = videoStubGetMusicPositionSeconds(ctx);
+            if (position <= 0.0) position = videoStubGetPositionSeconds();
+
+            // Queue exactly once when playback reaches the end.
+            if (position >= duration - 0.05) {
+                ctx->runner->asyncVideoCompletionPending = true;
+                videoStubState.completionEventQueued = true;
+            }
+        }
+    }
+
+    return RValue_makeReal(videoStubState.isPaused ? VIDEO_STUB_STATUS_PAUSED : VIDEO_STUB_STATUS_PLAYING);
+}
+
+static RValue builtin_video_pause(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "video_pause");
+    if (videoStubState.isOpen && !videoStubState.isPaused) {
+        videoStubState.pausedAtNanos = nowNanos();
+        videoStubState.isPaused = true;
+    }
+
+    AudioSystem* audio = videoStubGetAudioSystem(ctx);
+    AudioSystemVtable* vtable = videoStubGetAudioVtable(ctx);
+    if (audio != nullptr && vtable != nullptr && vtable->pauseSound != nullptr) {
+        int32_t handle = videoStubGetMusicHandle(ctx);
+        if (handle >= 0) {
+            vtable->pauseSound(audio, handle);
+        }
+    }
+
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_video_resume(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "video_resume");
+    if (videoStubState.isOpen && videoStubState.isPaused) {
+        uint64_t now = nowNanos();
+        if (now > videoStubState.pausedAtNanos) {
+            videoStubState.totalPausedNanos += (now - videoStubState.pausedAtNanos);
+        }
+        videoStubState.pausedAtNanos = 0;
+        videoStubState.isPaused = false;
+    }
+
+    AudioSystem* audio = videoStubGetAudioSystem(ctx);
+    AudioSystemVtable* vtable = videoStubGetAudioVtable(ctx);
+    if (audio != nullptr && vtable != nullptr && vtable->resumeSound != nullptr) {
+        int32_t handle = videoStubGetMusicHandle(ctx);
+        if (handle >= 0) {
+            vtable->resumeSound(audio, handle);
+        }
+    }
+
+    // Chapter 5 uses a delayed helper object to call video_resume; that path can leave
+    // obj_room_garden_video._paused stuck true, which hard-stops Step execution.
+    // Force-clear it on all live room video instances.
+    if (videoStubState.ownerInstance != nullptr && !videoStubState.ownerInstance->destroyed) {
+        variableInstanceSetOn(ctx, videoStubState.ownerInstance, "_paused", RValue_makeBool(false), "video_resume");
+        variableInstanceSetOn(ctx, videoStubState.ownerInstance, "_video_enabled", RValue_makeBool(true), "video_resume");
+    } else if (ctx != nullptr && ctx->runner != nullptr) {
+        int32_t videoObjIndex = videoStubFindObjectIndexByName(ctx, "obj_room_garden_video");
+        if (videoObjIndex >= 0) {
+            repeat(arrlen(ctx->runner->instances), i) {
+                Instance* inst = ctx->runner->instances[i];
+                if (inst == nullptr || inst->objectIndex != videoObjIndex) continue;
+                variableInstanceSetOn(ctx, inst, "_paused", RValue_makeBool(false), "video_resume");
+                variableInstanceSetOn(ctx, inst, "_video_enabled", RValue_makeBool(true), "video_resume");
+            }
+        }
+    }
+
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_video_close(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "video_close");
+    memset(&videoStubState, 0, sizeof(videoStubState));
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_video_get_position(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "video_get_position");
+    if (!videoStubState.isOpen) return RValue_makeReal(0.0);
+
+    // Prefer the paired music stream position to avoid repeated re-seeks that cause crackling.
+    double musicPos = videoStubGetMusicPositionSeconds(ctx);
+    if (musicPos > 0.0 || (videoStubState.isPaused && videoStubGetMusicLengthSeconds(ctx) > 0.0)) {
+        return RValue_makeReal(musicPos);
+    }
+
+    return RValue_makeReal(videoStubGetPositionSeconds());
+}
+
+static RValue builtin_video_draw(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    logStubbedFunction(ctx, "video_draw");
+
+    // Contract used by DELTARUNE CH5:
+    //   _video_data[0] = draw status (0 means frame available)
+    //   _video_data[1] = surface id to draw
+    GMLArray* out = GMLArray_create(ctx->dataWin->gen8.wadVersion, 2);
+    // Return non-zero status so scripts skip draw_surface_ext on a placeholder surface.
+    // This avoids feedback artifacts from drawing application_surface onto itself.
+    *GMLArray_slot(out, 0) = RValue_makeReal(1.0);
+    *GMLArray_slot(out, 1) = RValue_makeReal(-1.0);
+    return RValue_makeArray(out);
+}
+
 // ===[ Audio Built-in Functions ]===
 
 // Helper to get the AudioSystem from VMContext (returns nullptr if no audio)
@@ -16584,6 +16864,18 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "steam_file_write", builtin_steam_file_write);
     VM_registerBuiltin(ctx, "steam_file_read", builtin_steam_file_read);
     VM_registerBuiltin(ctx, "steam_get_persona_name", builtin_steam_get_persona_name);
+
+    // Video playback (stubbed state machine)
+    VM_registerBuiltin(ctx, "video_open", builtin_video_open);
+    VM_registerBuiltin(ctx, "video_enable_loop", builtin_video_enable_loop);
+    VM_registerBuiltin(ctx, "video_get_format", builtin_video_get_format);
+    VM_registerBuiltin(ctx, "video_get_duration", builtin_video_get_duration);
+    VM_registerBuiltin(ctx, "video_get_status", builtin_video_get_status);
+    VM_registerBuiltin(ctx, "video_pause", builtin_video_pause);
+    VM_registerBuiltin(ctx, "video_resume", builtin_video_resume);
+    VM_registerBuiltin(ctx, "video_close", builtin_video_close);
+    VM_registerBuiltin(ctx, "video_get_position", builtin_video_get_position);
+    VM_registerBuiltin(ctx, "video_draw", builtin_video_draw);
 
     // Audio
     VM_registerBuiltin(ctx, "audio_system_is_available", builtin_audio_system_is_available);

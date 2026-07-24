@@ -89,6 +89,7 @@
 #define OTHER_OUTSIDE_VIEW6  46
 #define OTHER_OUTSIDE_VIEW7  47
 #define OTHER_ASYNC_DIALOG   63
+#define OTHER_ASYNC_SOCIAL   70
 #define OTHER_ASYNC_SAVE_LOAD 72
 #define OTHER_ASYNC_SYSTEM   75
 
@@ -580,6 +581,7 @@ struct Runner {
 
     // Async map ID
     int32_t asyncLoadMapId;
+    bool asyncVideoCompletionPending;
 
     // Async buffer save/load state
     char* asyncBufferGroupName;                   // current group name (nullptr when no group is open); applied as a directory prefix
