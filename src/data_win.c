@@ -237,6 +237,7 @@ void GamePath_computeInternal(GamePath* path) {
 // Get interpolated position at t in [0,1] (yyPath.js:362-409)
 PathPositionResult GamePath_getPosition(GamePath* path, float t) {
     PathPositionResult result = {0};
+    result.speed = 100.0f;
 
     if (path->internalPointCount == 0) return result;
 
