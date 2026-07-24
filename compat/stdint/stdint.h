@@ -14,6 +14,7 @@
 /* MSVC used to define intptr_t here, before it had stdint.h */
 #include <crtdefs.h>
 #define intptr_t __bs_intptr_t
+#define uintptr_t __bs_uintptr_t
 #endif
 
 typedef signed char int8_t;
@@ -30,6 +31,12 @@ typedef int64_t int_fast64_t;
 
 typedef int64_t intmax_t;
 
+#ifdef _WIN64
+typedef int64_t intptr_t;
+typedef uint64_t uintptr_t;
+#else
 typedef long intptr_t;
+typedef unsigned long uintptr_t;
+#endif
 
 #endif /* _BS_STDINT_H_ */
