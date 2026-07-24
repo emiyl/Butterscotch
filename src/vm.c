@@ -255,12 +255,20 @@ static void cowForkSlotForModificationIfNeeded(VMContext* ctx, RValue* slot) {
     slot->ownsReference = true;
 }
 
-// Write array[index] = val with CoW semantics. Always makes an independent copy of val, caller retains ownership and must RValue_free(&val) when done.
+// Write array[index] = val with CoW semantics.
+//
+// We snapshot val up front because CoW may decRef/free the currently shared array,
+// and val can be a weak view into that same array.
+//
+// Caller retains ownership of `val` and must still RValue_free(&val) when done.
 // `slot` is the RValue* holding the array (e.g. &globalVars[id], &inst->selfVars[..].value, &localVars[slot]).
 // Returns the (possibly newly-forked) GMLArray* now in *slot.
 static GMLArray* VM_arraySetWithCoW(VMContext* ctx, RValue* slot, int32_t index, RValue val) {
     require(slot != nullptr);
     requireMessageFormatted(__FILE__, __LINE__, index >= 0, "Trying to write to an array using a negative index! Index: %d", index);
+
+    // Stabilize the incoming value before any possible CoW decRef/free on `slot->array`.
+    RValue writeVal = RValue_makeIndependent(val);
 
     void* intendedOwner;
 #if IS_WAD17_OR_HIGHER_ENABLED
@@ -277,7 +285,7 @@ static GMLArray* VM_arraySetWithCoW(VMContext* ctx, RValue* slot, int32_t index,
         fresh->owner = intendedOwner;
         *slot = RValue_makeArray(fresh);
         GMLArray_growTo(fresh, index + 1);
-        GMLArray_set(fresh, index, val);
+        RValue_writeIntoSlotStealingOwnershipOrCopying(GMLArray_slot(fresh, index), writeVal);
         return fresh;
     }
 
@@ -299,7 +307,8 @@ static GMLArray* VM_arraySetWithCoW(VMContext* ctx, RValue* slot, int32_t index,
     }
 
     // Case 3: Write!
-    GMLArray_set(arr, index, val);
+    GMLArray_growTo(arr, index + 1);
+    RValue_writeIntoSlotStealingOwnershipOrCopying(GMLArray_slot(arr, index), writeVal);
     return arr;
 }
 
