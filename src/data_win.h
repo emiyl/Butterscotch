@@ -308,7 +308,7 @@ typedef struct {
 
 typedef struct {
     bool present;
-    char* name;
+    const char* name;
     bool isSmooth;
     bool isClosed;
     uint32_t precision;

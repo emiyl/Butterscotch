@@ -14667,7 +14667,6 @@ static RValue builtin_path_duplicate(VMContext* ctx, RValue* args, int32_t argCo
         );
 
         if (newPath->points == nullptr) {
-            free(newPath->name);
             memset(newPath, 0, sizeof(GamePath));
             return RValue_makeInt32(-1);
         }
@@ -14687,7 +14686,6 @@ static RValue builtin_path_duplicate(VMContext* ctx, RValue* args, int32_t argCo
 
         if (newPath->internalPoints == nullptr) {
             free(newPath->points);
-            free(newPath->name);
             memset(newPath, 0, sizeof(GamePath));
             return RValue_makeInt32(-1);
         }
