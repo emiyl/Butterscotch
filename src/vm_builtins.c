@@ -15198,6 +15198,14 @@ static RValue builtin_path_get_speed(VMContext* ctx, RValue* args, int32_t argCo
     return RValue_makeReal(GamePath_getPosition(path, (float) RValue_toReal(args[1])).speed);
 }
 
+// path_get_name(path) - returns the name of the path as a string
+static RValue builtin_path_get_name(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (1 > argCount) return RValue_makeString("");
+    GamePath* path = getPath(ctx->runner, RValue_toInt32(args[0]));
+    if (path == nullptr) return RValue_makeString("");
+    return RValue_makeString(path->name);
+}
+
 // path_get_kind(path) - 0=straight, 1=smooth
 static RValue builtin_path_get_kind(VMContext* ctx, RValue* args, int32_t argCount) {
     if (1 > argCount) return RValue_makeReal(0.0);
@@ -17277,6 +17285,7 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "path_get_x", builtin_path_get_x);
     VM_registerBuiltin(ctx, "path_get_y", builtin_path_get_y);
     VM_registerBuiltin(ctx, "path_get_speed", builtin_path_get_speed);
+    VM_registerBuiltin(ctx, "path_get_name", builtin_path_get_name);
     VM_registerBuiltin(ctx, "path_get_kind", builtin_path_get_kind);
     VM_registerBuiltin(ctx, "path_get_closed", builtin_path_get_closed);
     VM_registerBuiltin(ctx, "path_get_precision", builtin_path_get_precision);
