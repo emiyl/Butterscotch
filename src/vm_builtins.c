@@ -12922,6 +12922,21 @@ static int32_t resolveLayerIdArg(Runner* runner, RValue arg) {
     return RValue_toInt32(arg);
 }
 
+static bool layerNameMatchesWithNumericSuffix(const char* layerName, const char* queriedName) {
+    if (layerName == nullptr || queriedName == nullptr) return false;
+    size_t queriedLen = strlen(queriedName);
+    if (queriedLen == 0) return false;
+    if (strncasecmp(layerName, queriedName, queriedLen) != 0) return false;
+    if (layerName[queriedLen] != '_') return false;
+    const char* suffix = layerName + queriedLen + 1;
+    if (*suffix == '\0') return false;
+    while (*suffix != '\0') {
+        if (!isdigit((unsigned char) *suffix)) return false;
+        suffix++;
+    }
+    return true;
+}
+
 static void instanceSetLayerActiveState(Runner* runner, int32_t layerId, bool isActive) {
     if (0 > layerId || runner->currentRoom == nullptr) return;
 
@@ -12990,6 +13005,26 @@ static RValue builtin_layer_get_id(VMContext* ctx, RValue* args, MAYBE_UNUSED in
             RoomLayer* layer = &runner->currentRoom->layers[i];
             if (layer->name != nullptr && strcasecmp(layer->name, name) == 0) {
                 result = (int32_t) layer->id;
+                break;
+            }
+        }
+    }
+
+    // Compatibility fallback: some games lookup base layer names (e.g. "TILES_GRASS")
+    // while room layers are suffixed (e.g. "TILES_GRASS_1"). Prefer the first suffix match.
+    if (result == -1) {
+        size_t runtimeLayerCount = arrlenu(runner->runtimeLayers);
+        repeat(runtimeLayerCount, i) {
+            RuntimeLayer* runtimeLayer = &runner->runtimeLayers[i];
+            const char* runtimeLayerName = nullptr;
+            if (runtimeLayer->dynamic) {
+                runtimeLayerName = runtimeLayer->dynamicName;
+            } else if (runner->currentRoom != nullptr) {
+                RoomLayer* roomLayer = Runner_findRoomLayerById(runner->currentRoom, (int32_t) runtimeLayer->id);
+                if (roomLayer != nullptr) runtimeLayerName = roomLayer->name;
+            }
+            if (layerNameMatchesWithNumericSuffix(runtimeLayerName, name)) {
+                result = (int32_t) runtimeLayer->id;
                 break;
             }
         }
