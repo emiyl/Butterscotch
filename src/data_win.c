@@ -1026,7 +1026,7 @@ static void parsePATH(BinaryReader* reader, DataWin* dw) {
         path->internalPoints = nullptr;
         path->internalPointCount = 0;
         path->length = 0.0;
-        path->name = readStringPtr(reader, dw);
+        path->name = safeStrdup(readStringPtr(reader, dw));
         path->isSmooth = BinaryReader_readBool32(reader);
         path->isClosed = BinaryReader_readBool32(reader);
         path->precision = BinaryReader_readUint32(reader);
