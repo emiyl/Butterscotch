@@ -12907,13 +12907,13 @@ static int32_t resolveLayerIdArg(Runner* runner, RValue arg) {
         size_t runtimeLayerCount = arrlenu(runner->runtimeLayers);
         repeat(runtimeLayerCount, i) {
             RuntimeLayer* rl = &runner->runtimeLayers[i];
-            if (rl->dynamic && strcmp(rl->dynamicName, name) == 0)
+            if (rl->dynamic && rl->dynamicName != nullptr && strcasecmp(rl->dynamicName, name) == 0)
                 return (int32_t) rl->id;
         }
         if (runner->currentRoom != nullptr) {
             repeat(runner->currentRoom->layerCount, i) {
                 RoomLayer* layer = &runner->currentRoom->layers[i];
-                if (layer->name != nullptr && strcmp(layer->name, name) == 0)
+                if (layer->name != nullptr && strcasecmp(layer->name, name) == 0)
                     return (int32_t) layer->id;
             }
         }
@@ -12963,14 +12963,24 @@ static RValue builtin_instance_deactivate_layer(VMContext* ctx, RValue* args, in
 
 static RValue builtin_layer_get_id(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
     Runner* runner = ctx->runner;
-    char* name = RValue_toString(args[0]);
+    RValue arg = args[0];
+
+    // GameMaker accepts either a numeric layer id or a layer name string.
+    if (arg.type != RVALUE_STRING) {
+        int32_t id = RValue_toInt32(arg);
+        RuntimeLayer* rl = Runner_findRuntimeLayerById(runner, id);
+        return RValue_makeReal((GMLReal) (rl != nullptr ? id : -1));
+    }
+
+    const char* name = arg.string;
     if (name == nullptr) return RValue_makeReal(-1.0);
+
     int32_t result = -1;
     // Check dynamic layers first (they may shadow a parsed layer by name).
     size_t runtimeLayerCount = arrlenu(runner->runtimeLayers);
     repeat(runtimeLayerCount, i) {
         RuntimeLayer* runtimeLayer = &runner->runtimeLayers[i];
-        if (runtimeLayer->dynamic && strcmp(runtimeLayer->dynamicName, name) == 0) {
+        if (runtimeLayer->dynamic && runtimeLayer->dynamicName != nullptr && strcasecmp(runtimeLayer->dynamicName, name) == 0) {
             result = (int32_t) runtimeLayer->id;
             break;
         }
@@ -12978,13 +12988,13 @@ static RValue builtin_layer_get_id(VMContext* ctx, RValue* args, MAYBE_UNUSED in
     if (result == -1 && runner->currentRoom != nullptr) {
         repeat(runner->currentRoom->layerCount, i) {
             RoomLayer* layer = &runner->currentRoom->layers[i];
-            if (layer->name != nullptr && strcmp(layer->name, name) == 0) {
+            if (layer->name != nullptr && strcasecmp(layer->name, name) == 0) {
                 result = (int32_t) layer->id;
                 break;
             }
         }
     }
-    free(name);
+
     return RValue_makeReal((GMLReal) result);
 }
 
