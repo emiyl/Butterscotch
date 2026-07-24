@@ -13033,6 +13033,7 @@ static RValue builtin_layer_get_id(VMContext* ctx, RValue* args, MAYBE_UNUSED in
         }
     }
 
+
     return RValue_makeReal((GMLReal) result);
 }
 
