@@ -13030,7 +13030,7 @@ static RValue builtin_layer_get_id(VMContext* ctx, RValue* args, MAYBE_UNUSED in
     size_t runtimeLayerCount = arrlenu(runner->runtimeLayers);
     repeat(runtimeLayerCount, i) {
         RuntimeLayer* runtimeLayer = &runner->runtimeLayers[i];
-        if (runtimeLayer->dynamic && strcmp(runtimeLayer->dynamicName, name) == 0) {
+        if (runtimeLayer->dynamic && runtimeLayer->dynamicName != nullptr && strcasecmp(runtimeLayer->dynamicName, name) == 0) {
             result = (int32_t) runtimeLayer->id;
             break;
         }
@@ -13038,13 +13038,12 @@ static RValue builtin_layer_get_id(VMContext* ctx, RValue* args, MAYBE_UNUSED in
     if (result == -1 && runner->currentRoom != nullptr) {
         repeat(runner->currentRoom->layerCount, i) {
             RoomLayer* layer = &runner->currentRoom->layers[i];
-            if (layer->name != nullptr && strcmp(layer->name, name) == 0) {
+            if (layer->name != nullptr && strcasecmp(layer->name, name) == 0) {
                 result = (int32_t) layer->id;
                 break;
             }
         }
     }
-    free(name);
     return RValue_makeReal((GMLReal) result);
 }
 
