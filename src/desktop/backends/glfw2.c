@@ -62,6 +62,22 @@ void platformSetWindowTitle(const char* title) {
     glfwSetWindowTitle(windowTitle);
 }
 
+bool platformGetWindowFullscreen(void) {
+    return glfwGetWindowParam(GLFW_FULLSCREEN) != 0;
+}
+
+void platformSetWindowFullscreen(bool fullscreen) {
+    if (fullscreen) {
+        glfwSetWindowParam(GLFW_FULLSCREEN, GLFW_TRUE);
+    } else {
+        glfwSetWindowParam(GLFW_FULLSCREEN, GLFW_FALSE);
+    }
+}
+
+// void platformEnableBorderlessFullscreen(bool enable) {
+//     // GLFW 2 does not support borderless fullscreen, so this is a no-op
+// }
+
 bool platformGetWindowSize(int32_t* outW, int32_t* outH) {
     if (!outW || !outH) return false;
     int w = 0;

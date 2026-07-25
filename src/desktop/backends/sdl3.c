@@ -114,6 +114,23 @@ void platformSetWindowTitle(const char* title) {
     SDL_SetWindowTitle(window, windowTitle);
 }
 
+bool platformGetWindowFullscreen(void) {
+    return SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
+}
+
+void platformSetWindowFullscreen(bool fullscreen) {
+    SDL_SetWindowFullscreen(window, fullscreen);
+}
+
+void platformEnableBorderlessFullscreen(bool enable) {
+    if (enable) {
+        SDL_SetWindowFullscreenMode(window, NULL); // Use desktop resolution (borderless)
+        SDL_SetWindowFullscreen(window, true);
+    } else {
+        SDL_SetWindowFullscreen(window, false);
+    }
+}
+
 bool platformGetWindowSize(int32_t* outW, int32_t* outH) {
     if (!outW || !outH) return false;
     *outW = fbWidth;

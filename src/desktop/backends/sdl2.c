@@ -97,6 +97,27 @@ void platformSetWindowTitle(const char* title) {
     SDL_SetWindowTitle(window, windowTitle);
 }
 
+bool platformGetWindowFullscreen(void) {
+    Uint32 flags = SDL_GetWindowFlags(window);
+    return (flags & SDL_WINDOW_FULLSCREEN) != 0;
+}
+
+void platformSetWindowFullscreen(bool fullscreen) {
+    if (fullscreen) {
+        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+    } else {
+        SDL_SetWindowFullscreen(window, 0);
+    }
+}
+
+void platformEnableBorderlessFullscreen(bool enable) {
+    if (enable) {
+        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+    } else {
+        SDL_SetWindowFullscreen(window, 0);
+    }
+}
+
 bool platformGetWindowSize(int32_t* outW, int32_t* outH) {
     if (!outW || !outH) return false;
     if (gfx == SOFTWARE) {

@@ -85,6 +85,31 @@ void platformSetWindowTitle(const char* title) {
     glfwSetWindowTitle(window, windowTitle);
 }
 
+bool platformGetWindowFullscreen(void) {
+    if (!window) return false;
+    return glfwGetWindowMonitor(window) != NULL;
+}
+
+void platformSetWindowFullscreen(bool fullscreen) {
+    if (!window) return;
+    if (fullscreen) {
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        if (!monitor) return;
+        const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+        if (!mode) return;
+        glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+    } else {
+        int width = 640;
+        int height = 480;
+        glfwSetWindowMonitor(window, NULL, 100, 100, width, height, 0);
+    }
+}
+
+void platformEnableBorderlessFullscreen(bool enable) {
+    if (!window) return;
+    glfwSetWindowAttrib(window, GLFW_DECORATED, enable ? GLFW_FALSE : GLFW_TRUE);
+}
+
 bool platformGetWindowSize(int32_t* outW, int32_t* outH) {
     if (!outW || !outH || !window) return false;
     int w = 0;

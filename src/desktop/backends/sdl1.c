@@ -207,6 +207,25 @@ void platformSetWindowTitle(const char* title) {
     SDL_WM_SetCaption(windowTitle, NULL);
 }
 
+bool platformGetWindowFullscreen(void) {
+    Uint32 flags = SDL_GetVideoSurface()->flags;
+    return (flags & SDL_FULLSCREEN) != 0;
+}
+
+void platformSetWindowFullscreen(bool fullscreen) {
+    Uint32 flags = SDL_GetVideoSurface()->flags;
+    if (fullscreen) {
+        flags |= SDL_FULLSCREEN;
+    } else {
+        flags &= ~SDL_FULLSCREEN;
+    }
+    SDL_SetVideoMode(fbWidth, fbHeight, 0, flags);
+}
+
+// void platformEnableBorderlessFullscreen(bool enable) {
+//     // SDL 1.2 does not support borderless fullscreen, so we ignore this.
+// }
+
 bool platformGetWindowSize(int32_t* outW, int32_t* outH) {
     if (!outW || !outH) return false;
     *outW = fbWidth;

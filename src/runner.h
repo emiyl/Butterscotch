@@ -504,6 +504,9 @@ struct Runner {
     int32_t applicationSurfaceId;
     void (*setWindowTitle)(const char* title);
     bool (*getWindowSize)(int32_t* outW, int32_t* outH);
+    bool (*getWindowFullscreen)(void);
+    void (*setWindowFullscreen)(bool fullscreen);
+    void (*enableBorderlessFullscreen)(bool enable);
     void (*setWindowSize)(int32_t width, int32_t height);
     bool (*windowHasFocus)(void);
     void (*setCursor)(int32_t cursorType);

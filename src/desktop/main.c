@@ -1418,6 +1418,9 @@ int main(int argc, char* argv[]) {
         runner->debugMode = args.debug;
         runner->osType = args.osType;
         runner->setWindowSize = platformSetWindowSize;
+        runner->getWindowFullscreen = platformGetWindowFullscreen;
+        runner->setWindowFullscreen = platformSetWindowFullscreen;
+        runner->enableBorderlessFullscreen = platformEnableBorderlessFullscreen;
         runner->getWindowSize = platformGetWindowSize;
         runner->setWindowTitle = platformSetWindowTitle;
         Runner_setGameArgs(runner, currentGameArgs, (int32_t) arrlen(currentGameArgs));
