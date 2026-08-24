@@ -1,3 +1,4 @@
+#include "gmdata_compat.h"
 #include "data_win.h"
 #include "binary_reader.h"
 
@@ -2718,509 +2719,79 @@ void DataWin_loadAudoIfNeeded(DataWin* dw, uint32_t audioEntryId) {
 // ===[ MAIN PARSE FUNCTION ]===
 
 DataWin* DataWin_parse(const char* filePath, DataWinParserOptions options) {
-    FILE* file = fopen(filePath, "rb");
-    if (!file) {
-        logError("Failed to open file: %s\n", filePath);
-        exit(1);
-    }
-
-    // Use a large read buffer to reduce the number of physical reads
-    // This is critical for slow I/O devices like the PS2 CDVD drive, where each fread
-    // call would otherwise trigger a separate disc read of just a few sectors
-    setvbuf(file, nullptr, _IOFBF, 128 * 1024);
-
-    fseek(file, 0, SEEK_END);
-    long fileSizeRaw = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    if (0 >= fileSizeRaw) {
-        logError("Invalid file size: %ld\n", fileSizeRaw);
-        fclose(file);
-        exit(1);
-    }
-    size_t fileSize = (size_t) fileSizeRaw;
-
-    // Allocate and zero-initialize DataWin
     DataWin* dw = (DataWin *)safeCalloc(1, sizeof(DataWin));
 
-    BinaryReader reader = BinaryReader_create(file, (size_t) fileSize);
-
-    // Some WAD files, such as ones made with https://github.com/AlexWaveDiver/TranslaTale (I think?) have pointers inside a chunk pointing to data in OTHER chunks
-    // The original runner doesn't care because it loads the entire file in memory up front, so we do the same if asked
-    // (we don't do that by default because some low end platforms would NOT be able to handle it)
-    uint8_t* wholeFileData = nullptr;
-    if (options.loadType == DATAWINLOADTYPE_LOAD_IN_MEMORY_AHEAD_OF_TIME) {
-        wholeFileData = (uint8_t *)safeMalloc((size_t) fileSize);
-        safeFread(wholeFileData, fileSize, file, filePath);
-        BinaryReader_setBuffer(&reader, wholeFileData, 0, (size_t) fileSize);
-    } else if (options.loadType == DATAWINLOADTYPE_MAP_FILE) {
-        wholeFileData = mapFile(file, fileSize);
-        if (!wholeFileData) {
-            logError("Failed to map file\n");
-            fclose(file);
-            exit(1);
-        }
-        BinaryReader_setBuffer(&reader, wholeFileData, 0, (size_t) fileSize);
-        dw->mappedFile = wholeFileData;
+    logInfo("DataWin_parse: initializing parser options...\n");
+    
+    gmdata_DataWinParserOptions gmdataOptions = {0};
+    gmdata_DataWin_initParserOptions(&gmdataOptions);
+    if (filePath == NULL) {
+        logError("DataWin_parse: filePath is NULL.\n");
+        free(dw);
+        return NULL;
     }
 
-    // Validate FORM header
-    char formMagic[4];
-    BinaryReader_readBytes(&reader, formMagic, 4);
-    // Some games may purposely corrupt the magic value so that UndertaleModTool doesn't open it
-    // The native runner does not care about verifying the magic value, so we'll validate it and warn, but we won't exit
-    if (memcmp(formMagic, "FORM", 4) != 0) {
-        logWarn("The file does not have the expected FORM magic, got '%.4s'. The file may not be a WAD or it may have been tampered with!\n", formMagic);
+    logInfo("DataWin_parse: setting parser options...\n");
+
+    gmdataOptions.parseGen8 = options.parseGen8;
+    gmdataOptions.parseOptn = options.parseOptn;
+    gmdataOptions.parseLang = options.parseLang;
+    gmdataOptions.parseExtn = options.parseExtn;
+    gmdataOptions.parseSond = options.parseSond;
+    gmdataOptions.parseAgrp = options.parseAgrp;
+    gmdataOptions.parseSprt = options.parseSprt;
+    gmdataOptions.parseBgnd = options.parseBgnd;
+    gmdataOptions.parsePath = options.parsePath;
+    gmdataOptions.parseScpt = options.parseScpt;
+    gmdataOptions.parseGlob = options.parseGlob;
+    gmdataOptions.parseShdr = options.parseShdr;
+    gmdataOptions.parseFont = options.parseFont;
+    gmdataOptions.parseTmln = options.parseTmln;
+    gmdataOptions.parseObjt = options.parseObjt;
+    gmdataOptions.parseRoom = options.parseRoom;
+    gmdataOptions.parseTpag = options.parseTpag;
+    gmdataOptions.parseCode = options.parseCode;
+    gmdataOptions.parseVari = options.parseVari;
+    gmdataOptions.parseFunc = options.parseFunc;
+    gmdataOptions.parseStrg = options.parseStrg;
+    gmdataOptions.parseTxtr = options.parseTxtr;
+    gmdataOptions.parseAudo = options.parseAudo;
+    gmdataOptions.skipLoadingPreciseMasksForNonPreciseSprites = options.skipLoadingPreciseMasksForNonPreciseSprites;
+    gmdataOptions.lazyLoadRooms = options.lazyLoadRooms;
+    gmdataOptions.lazyLoadTextures = options.lazyLoadTextures;
+    gmdataOptions.lazyLoadAudio = options.lazyLoadAudio;
+    gmdataOptions.loadType = options.loadType;
+
+    logInfo("DataWin_parse: loading file '%s'...\n", filePath);
+
+    if (gmdata_DataWin_loadFile((gmdata_DataWin *)dw, filePath) != 0) {
+        logError("DataWin_parse: failed to load file '%s'.\n", filePath);
+        free(dw);
+        return NULL;
+    }
+    
+    logInfo("DataWin_parse: file '%s' loaded successfully, parsing...\n", filePath);
+
+    if (gmdata_DataWin_parseWithOptions((gmdata_DataWin *)dw, &gmdataOptions) != 0) {
+        logError("DataWin_parse: failed to parse file '%s'.\n", filePath);
+        gmdata_DataWin_free((gmdata_DataWin *)dw);
+        free(dw);
+        return NULL;
     }
 
-    uint32_t formLength = BinaryReader_readUint32(&reader);
-    (void) formLength;
-
-    // Pass 1: Count total chunks and find STRG chunk offset.
-    // All other chunks reference strings from STRG, so it must be loaded first.
-    // We also check if the CODE chunk exists.
-    int totalChunks = 0;
-    bool codeExists = false;
-    BinaryReader_seek(&reader, 8); // reset to after FORM header
-
-    while ((size_t) fileSize > BinaryReader_getPosition(&reader)) {
-        if (BinaryReader_getPosition(&reader) + 8 > (size_t) fileSize) break;
-
-        char chunkName[5] = {0};
-        BinaryReader_readBytes(&reader, chunkName, 4);
-        uint32_t chunkLength = BinaryReader_readUint32(&reader);
-        size_t chunkDataStart = BinaryReader_getPosition(&reader);
-
-        if (options.parseStrg && memcmp(chunkName, "STRG", 4) == 0) {
-            dw->strgBufferBase = chunkDataStart;
-            if (dw->mappedFile)
-                dw->strgBuffer = dw->mappedFile + chunkDataStart;
-            else
-                dw->strgBuffer = BinaryReader_readBytesAt(&reader, chunkDataStart, chunkLength);
-        }
-
-        if ((memcmp(chunkName, "CODE", 4) == 0) && chunkLength > 0) {
-            codeExists = true;
-        }
-
-        // Bump detected version based on chunk presence, so later chunks can use the right version during parsing (parseOBJT needs to know we're >= 2.3 to probe for the GMS 2022.5+ Managed field).
-        if (memcmp(chunkName, "ACRV", 4) == 0 || memcmp(chunkName, "SEQN", 4) == 0 || memcmp(chunkName, "TAGS", 4) == 0) {
-            DataWin_bumpVersionTo(dw, 2, 3, 0, 0);
-        } else if (memcmp(chunkName, "FEDS", 4) == 0) {
-            DataWin_bumpVersionTo(dw, 2, 3, 6, 0);
-        } else if (memcmp(chunkName, "FEAT", 4) == 0) {
-            DataWin_bumpVersionTo(dw, 2022, 8, 0, 0);
-        } else if (memcmp(chunkName, "UILR", 4) == 0) {
-            DataWin_bumpVersionTo(dw, 2024, 13, 0, 0);
-        } else if (memcmp(chunkName, "PSEM", 4) == 0 || memcmp(chunkName, "PSYS", 4) == 0) {
-            DataWin_bumpVersionTo(dw, 2023, 2, 0, 0);
-        }
-
-        if (chunkDataStart + chunkLength > fileSize) {
-            logWarn("Chunk data extends beyond file size: chunkDataStart=%zu, chunkLength=%u, fileSize=%zu! Are you running a GameMaker Raspberry Pi game? Skipping bytes out of bounds...\n", chunkDataStart, chunkLength, fileSize);
-            break;
-        }
-
-        BinaryReader_seek(&reader, chunkDataStart + chunkLength);
-        totalChunks++;
-    }
-
-    if (!codeExists && options.parseCode) {
-        logError("CODE chunk does not exist or is empty! This usually means you're loading a YYC game.\n");
-        fclose(file);
-        exit(1);
-    }
-
-    // Pass 2: Parse all chunks
-    // For each chunk that will be parsed, we bulk-read the entire chunk into memory first
-    // and then parse from the memory buffer. This dramatically reduces the number of physical
-    // reads on slow I/O devices like the PS2 CDVD drive.
-    BinaryReader_seek(&reader, 8); // skip past FORM header
-    int chunkIndex = 0;
-    while ((size_t) fileSize > BinaryReader_getPosition(&reader)) {
-        if (BinaryReader_getPosition(&reader) + 8 > (size_t) fileSize) break;
-
-        char chunkName[5] = {0};
-        BinaryReader_readBytes(&reader, chunkName, 4);
-        uint32_t chunkLength = BinaryReader_readUint32(&reader);
-        size_t chunkDataStart = BinaryReader_getPosition(&reader);
-        size_t chunkEnd = chunkDataStart + chunkLength;
-
-        if (options.progressCallback) {
-            options.progressCallback(chunkName, chunkIndex, totalChunks, dw, options.progressCallbackUserData);
-        }
-
-        // Determine if this chunk will be parsed (and thus needs bulk loading)
-        bool shouldParse =
-            (options.parseGen8 && memcmp(chunkName, "GEN8", 4) == 0) ||
-            (options.parseOptn && memcmp(chunkName, "OPTN", 4) == 0) ||
-            (options.parseLang && memcmp(chunkName, "LANG", 4) == 0) ||
-            (options.parseExtn && memcmp(chunkName, "EXTN", 4) == 0) ||
-            (options.parseSond && memcmp(chunkName, "SOND", 4) == 0) ||
-            (options.parseAgrp && memcmp(chunkName, "AGRP", 4) == 0) ||
-            (options.parseSprt && memcmp(chunkName, "SPRT", 4) == 0) ||
-            (options.parseBgnd && memcmp(chunkName, "BGND", 4) == 0) ||
-            (options.parsePath && memcmp(chunkName, "PATH", 4) == 0) ||
-            (options.parseScpt && memcmp(chunkName, "SCPT", 4) == 0) ||
-            (options.parseGlob && memcmp(chunkName, "GLOB", 4) == 0) ||
-            (options.parseShdr && memcmp(chunkName, "SHDR", 4) == 0) ||
-            (options.parseFont && memcmp(chunkName, "FONT", 4) == 0) ||
-            (options.parseTmln && memcmp(chunkName, "TMLN", 4) == 0) ||
-            (options.parseObjt && memcmp(chunkName, "OBJT", 4) == 0) ||
-            (options.parseRoom && memcmp(chunkName, "ROOM", 4) == 0) ||
-            (options.parseTpag && memcmp(chunkName, "TPAG", 4) == 0) ||
-            (options.parseCode && memcmp(chunkName, "CODE", 4) == 0) ||
-            (options.parseVari && memcmp(chunkName, "VARI", 4) == 0) ||
-            (options.parseFunc && memcmp(chunkName, "FUNC", 4) == 0) ||
-            (options.parseStrg && memcmp(chunkName, "STRG", 4) == 0) ||
-            (options.parseTxtr && memcmp(chunkName, "TXTR", 4) == 0) ||
-            (options.parseAudo && memcmp(chunkName, "AUDO", 4) == 0) ||
-            (memcmp(chunkName, "ACRV", 4) == 0);
-
-        // Bulk-read the chunk data into memory for fast parsing
-        uint8_t* chunkBuffer = nullptr;
-        if (shouldParse && chunkLength > 0 && options.loadType == DATAWINLOADTYPE_LOAD_PER_CHUNK) {
-            chunkBuffer = (uint8_t *)malloc(chunkLength);
-            if (chunkBuffer) {
-                size_t read = fread(chunkBuffer, 1, chunkLength, reader.file);
-                if (read != chunkLength) {
-                    logError("DataWin: short read on chunk %.4s (expected %u, got %zu)\n", chunkName, chunkLength, read);
-                    exit(1);
-                }
-                BinaryReader_setBuffer(&reader, chunkBuffer, chunkDataStart, chunkLength);
-            }
-        }
-
-        if (options.parseGen8 && memcmp(chunkName, "GEN8", 4) == 0) {
-            parseGEN8(&reader, dw);
-        } else if (options.parseOptn && memcmp(chunkName, "OPTN", 4) == 0) {
-            parseOPTN(&reader, dw);
-        } else if (options.parseLang && memcmp(chunkName, "LANG", 4) == 0) {
-            parseLANG(&reader, dw);
-        } else if (options.parseExtn && memcmp(chunkName, "EXTN", 4) == 0) {
-            parseEXTN(&reader, dw);
-        } else if (options.parseSond && memcmp(chunkName, "SOND", 4) == 0) {
-            parseSOND(&reader, dw);
-        } else if (options.parseAgrp && memcmp(chunkName, "AGRP", 4) == 0) {
-            parseAGRP(&reader, dw);
-        } else if (options.parseSprt && memcmp(chunkName, "SPRT", 4) == 0) {
-            parseSPRT(&reader, dw, options.skipLoadingPreciseMasksForNonPreciseSprites);
-        } else if (options.parseBgnd && memcmp(chunkName, "BGND", 4) == 0) {
-            parseBGND(&reader, dw, chunkEnd);
-        } else if (options.parsePath && memcmp(chunkName, "PATH", 4) == 0) {
-            parsePATH(&reader, dw);
-        } else if (options.parseScpt && memcmp(chunkName, "SCPT", 4) == 0) {
-            parseSCPT(&reader, dw);
-        } else if (options.parseGlob && memcmp(chunkName, "GLOB", 4) == 0) {
-            parseGLOB(&reader, dw);
-        } else if (options.parseShdr && memcmp(chunkName, "SHDR", 4) == 0) {
-            parseSHDR(&reader, dw);
-        } else if (options.parseFont && memcmp(chunkName, "FONT", 4) == 0) {
-            parseFONT(&reader, dw);
-        } else if (options.parseTmln && memcmp(chunkName, "TMLN", 4) == 0) {
-            parseTMLN(&reader, dw);
-        } else if (options.parseObjt && memcmp(chunkName, "OBJT", 4) == 0) {
-            parseOBJT(&reader, dw);
-        } else if (options.parseRoom && memcmp(chunkName, "ROOM", 4) == 0) {
-            parseROOM(&reader, dw, options.lazyLoadRooms, options.eagerlyLoadedRooms);
-        } else if (memcmp(chunkName, "DAFL", 4) == 0) {
-            // Empty chunk, nothing to parse
-        } else if (memcmp(chunkName, "EMBI", 4) == 0) {
-            // Embedded Images chunk
-        } else if (memcmp(chunkName, "TGIN", 4) == 0) {
-            // Texture Group Info chunk (wadVersion >= 17)
-        } else if (memcmp(chunkName, "ACRV", 4) == 0) {
-            // Animation Curves chunk (GMS 2.3+)
-            DataWin_bumpVersionTo(dw, 2, 3, 0, 0);
-            parseACRV(&reader, dw);
-        } else if (memcmp(chunkName, "SEQN", 4) == 0) {
-            // Sequences chunk (GMS 2.3+)
-            DataWin_bumpVersionTo(dw, 2, 3, 0, 0);
-        } else if (memcmp(chunkName, "TAGS", 4) == 0) {
-            // Tags chunk (GMS 2.3+)
-            DataWin_bumpVersionTo(dw, 2, 3, 0, 0);
-        } else if (memcmp(chunkName, "FEDS", 4) == 0) {
-            // Filter Effects Data chunk (GMS 2.3.6+)
-            DataWin_bumpVersionTo(dw, 2, 3, 6, 0);
-        } else if (options.parseTpag && memcmp(chunkName, "TPAG", 4) == 0) {
-            parseTPAG(&reader, dw);
-        } else if (options.parseCode && memcmp(chunkName, "CODE", 4) == 0) {
-            parseCODE(&reader, dw, chunkLength, chunkDataStart);
-        } else if (options.parseVari && memcmp(chunkName, "VARI", 4) == 0) {
-            parseVARI(&reader, dw, chunkLength);
-        } else if (options.parseFunc && memcmp(chunkName, "FUNC", 4) == 0) {
-            parseFUNC(&reader, dw, chunkLength);
-        } else if (options.parseStrg && memcmp(chunkName, "STRG", 4) == 0) {
-            parseSTRG(&reader, dw);
-        } else if (options.parseTxtr && memcmp(chunkName, "TXTR", 4) == 0) {
-            parseTXTR(&reader, dw, chunkEnd, options.lazyLoadTextures);
-        } else if (options.parseAudo && memcmp(chunkName, "AUDO", 4) == 0) {
-            parseAUDO(&reader, dw, options.lazyLoadAudio);
-        } else {
-            logInfo("Unknown chunk: %.4s (length %u at offset 0x%zX)\n", chunkName, chunkLength, chunkDataStart - 8);
-        }
-
-        // Free the chunk buffer and revert to FILE*-based reads for the next header
-        if (chunkBuffer != nullptr) {
-            BinaryReader_clearBuffer(&reader);
-            free(chunkBuffer);
-        }
-
-        // Seek to chunk end (skip any unread data or trailing padding)
-        if (options.loadType != DATAWINLOADTYPE_LOAD_PER_CHUNK) {
-            BinaryReader_seek(&reader, chunkEnd);
-        } else {
-            fseek(reader.file, (long) chunkEnd, SEEK_SET);
-        }
-        chunkIndex++;
-    }
-
-    // GMS2: apply default FPS to rooms with speed=0
-    if (dw->gen8.gms2FPS > 0) {
-        repeat(dw->room.count, i) {
-            if (dw->room.rooms[i].speed == 0) {
-                dw->room.rooms[i].speed = (uint32_t) dw->gen8.gms2FPS;
-            }
-        }
-    }
-
-    // If lazy-loading rooms, keep the file handle open for DataWin_loadRoomPayload, otherwise close it now
-    dw->lazyLoadRooms = options.lazyLoadRooms;
-    dw->lazyLoadTextures = options.lazyLoadTextures;
-    dw->lazyLoadAudio = options.lazyLoadAudio;
-    if (options.lazyLoadRooms || options.lazyLoadTextures || options.lazyLoadAudio) {
-        dw->lazyLoadFile = file;
-        dw->fileSize = (size_t) fileSize;
-    } else {
-        dw->lazyLoadFile = nullptr;
-        dw->fileSize = 0;
-        fclose(file);
-    }
-
-    if (options.loadType == DATAWINLOADTYPE_LOAD_IN_MEMORY_AHEAD_OF_TIME)
-        free(wholeFileData);
-
+    logInfo("DataWin_parse: file '%s' parsed successfully.\n", filePath);
+    
     return dw;
 }
 
 // ===[ FREE ]===
 
 void DataWin_free(DataWin* dw) {
-    if (!dw) return;
-
-    // GEN8
-    free(dw->gen8.roomOrder);
-
-    // OPTN
-    free(dw->optn.constants);
-
-    // LANG
-    free(dw->lang.entryIds);
-    if (dw->lang.languages) {
-        repeat(dw->lang.languageCount, i) {
-            free(dw->lang.languages[i].entries);
-        }
-        free(dw->lang.languages);
+    if (dw == NULL) {
+        return;
     }
 
-    // EXTN
-    if (dw->extn.extensions) {
-        repeat(dw->extn.count, i) {
-            Extension* ext = &dw->extn.extensions[i];
-            if (ext->files) {
-                repeat(ext->fileCount, j) {
-                    ExtensionFile* file = &ext->files[j];
-                    if (file->functions) {
-                        repeat(file->functionCount, k) {
-                            free(file->functions[k].arguments);
-                        }
-                        free(file->functions);
-                    }
-                }
-                free(ext->files);
-            }
-        }
-        free(dw->extn.extensions);
-    }
-
-    // SOND
-    free(dw->sond.sounds);
-
-    // AGRP
-    free(dw->agrp.audioGroups);
-
-    // SPRT
-    if (dw->sprt.sprites) {
-        repeat(dw->sprt.count, i) {
-            free(dw->sprt.sprites[i].tpagIndices);
-            if (dw->sprt.sprites[i].masks != nullptr) {
-                if (!dw->mappedFile) {
-                    repeat(dw->sprt.sprites[i].maskCount, j) {
-                        free(dw->sprt.sprites[i].masks[j]);
-                    }
-                }
-                free(dw->sprt.sprites[i].masks);
-            }
-            // Runtime-allocated sprites (indices >= parsedCount) own their synthesized name
-            if (i >= dw->sprt.parsedCount) free((char*) dw->sprt.sprites[i].name);
-        }
-        free(dw->sprt.sprites);
-    }
-
-
-    // BGND
-    if (dw->bgnd.backgrounds) {
-        repeat(dw->bgnd.count, i) {
-            free(dw->bgnd.backgrounds[i].gms2TileIds);
-        }
-    }
-    free(dw->bgnd.backgrounds);
-
-    // PATH
-    if (dw->path.paths) {
-        repeat(dw->path.count, i) {
-            free(dw->path.paths[i].points);
-            free(dw->path.paths[i].internalPoints);
-        }
-        free(dw->path.paths);
-    }
-
-    // SCPT
-    free(dw->scpt.scripts);
-
-    // GLOB
-    free(dw->glob.codeIds);
-
-    // SHDR
-    if (dw->shdr.shaders) {
-        repeat(dw->shdr.count, i) {
-            free(dw->shdr.shaders[i].vertexAttributes);
-        }
-        free(dw->shdr.shaders);
-    }
-
-    // FONT
-    if (dw->font.fonts) {
-        repeat(dw->font.count, i) {
-            Font* font = &dw->font.fonts[i];
-            if (font->glyphs) {
-                repeat(font->glyphCount, j) {
-                    free(font->glyphs[j].kerning);
-                }
-                free(font->glyphs);
-            }
-        }
-        free(dw->font.fonts);
-    }
-
-    // TMLN
-    if (dw->tmln.timelines) {
-        repeat(dw->tmln.count, i) {
-            Timeline* tl = &dw->tmln.timelines[i];
-            if (tl->moments) {
-                repeat(tl->momentCount, j) {
-                    free(tl->moments[j].actions);
-                }
-                free(tl->moments);
-            }
-        }
-        free(dw->tmln.timelines);
-    }
-
-    // OBJT
-    if (dw->objt.objects) {
-        repeat(dw->objt.count, i) {
-            GameObject* obj = &dw->objt.objects[i];
-            free(obj->physicsVertices);
-            repeat(OBJT_EVENT_TYPE_COUNT, e) {
-                ObjectEventList* list = &obj->eventLists[e];
-                if (list->events) {
-                    repeat(list->eventCount, j) {
-                        free(list->events[j].actions);
-                    }
-                    free(list->events);
-                }
-            }
-        }
-        free(dw->objt.objects);
-    }
-
-    // ACRV
-    if (dw->acrv.curves) {
-        repeat(dw->acrv.count, i) {
-            AnimCurve* cur = &dw->acrv.curves[i];
-            if (cur->channels) {
-                repeat(cur->channelCount, c) {
-                    free(cur->channels[c].points);
-                }
-                free(cur->channels);
-            }
-        }
-        free(dw->acrv.curves);
-    }
-    free(dw->acrv.allChannels);
-
-    // ROOM
-    if (dw->room.rooms) {
-        repeat(dw->room.count, i) {
-            DataWin_freeRoomPayload(&dw->room.rooms[i]);
-        }
-        free(dw->room.rooms);
-    }
-
-    // TPAG
-    free(dw->tpag.items);
-
-    // CODE
-    free(dw->code.entries);
-
-    // VARI
-    free(dw->vari.variables);
-
-    // FUNC
-    free(dw->func.functions);
-    if (dw->func.codeLocals) {
-        repeat(dw->func.codeLocalsCount, i) {
-            free(dw->func.codeLocals[i].locals);
-        }
-        free(dw->func.codeLocals);
-    }
-
-    // STRG
-    free(dw->strg.strings);
-
-    // TXTR
-    if (dw->txtr.textures) {
-        repeat(dw->txtr.count, i) {
-            if (!dw->txtr.textures[i].mapped)
-                free(dw->txtr.textures[i].blobData);
-        }
-        free(dw->txtr.textures);
-    }
-
-    // AUDO
-    if (dw->audo.entries) {
-        if (!dw->mappedFile) {
-            repeat(dw->audo.count, i) {
-                free(dw->audo.entries[i].data);
-            }
-        }
-        free(dw->audo.entries);
-    }
-
-    // Owned buffers
-    if (!dw->mappedFile)
-        free(dw->strgBuffer);
-    free(dw->bytecodeBuffer);
-
-    // Close the lazy-load file handle (only open when lazyLoadRooms/lazyLoadTextures was enabled)
-    if (dw->lazyLoadFile != nullptr) {
-        fclose(dw->lazyLoadFile);
-        dw->lazyLoadFile = nullptr;
-    }
-
-    unmapFile(dw->mappedFile, dw->fileSize);
-
+    gmdata_DataWin_free((gmdata_DataWin *)dw);
     free(dw);
 }
 
@@ -3302,17 +2873,9 @@ assignName:
 // ===[ Version Detection ]===
 
 bool DataWin_isVersionAtLeast(const DataWin* dw, uint32_t major, uint32_t minor, uint32_t release, uint32_t build) {
-    const DetectedFormat* f = &dw->detectedFormat;
-    if (f->major != major) return f->major > major;
-    if (f->minor != minor) return f->minor > minor;
-    if (f->release != release) return f->release > release;
-    return f->build >= build;
+    return gmdata_DataWin_isVersionAtLeast((const gmdata_DataWin *)dw, major, minor, release, build);
 }
 
 void DataWin_bumpVersionTo(DataWin* dw, uint32_t major, uint32_t minor, uint32_t release, uint32_t build) {
-    if (DataWin_isVersionAtLeast(dw, major, minor, release, build)) return;
-    dw->detectedFormat.major = major;
-    dw->detectedFormat.minor = minor;
-    dw->detectedFormat.release = release;
-    dw->detectedFormat.build = build;
+    gmdata_DataWin_bumpVersionTo((gmdata_DataWin *)dw, major, minor, release, build);
 }

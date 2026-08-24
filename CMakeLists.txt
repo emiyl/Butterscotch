@@ -200,6 +200,141 @@ target_include_directories(stb_vorbis SYSTEM INTERFACE ${CMAKE_SOURCE_DIR}/vendo
 target_sources(butterscotch PRIVATE vendor/md5/md5.c)
 target_include_directories(butterscotch PUBLIC vendor/md5)
 
+# libgmdata
+file(GLOB GMDATA_SOURCES vendor/libgmdata/src/*.c vendor/libgmdata/src/chunks/*.c)
+add_library(gmdata STATIC ${GMDATA_SOURCES})
+target_include_directories(gmdata SYSTEM PUBLIC vendor/libgmdata/include)
+target_compile_definitions(gmdata PRIVATE
+    DataWin=gmdata_DataWin
+    DataWin_initParserOptions=gmdata_DataWin_initParserOptions
+    DataWin_applyParserOptions=gmdata_DataWin_applyParserOptions
+    DataWin_loadFile=gmdata_DataWin_loadFile
+    DataWin_parseWithOptions=gmdata_DataWin_parseWithOptions
+    DataWin_parse=gmdata_DataWin_parse
+    DataWin_free=gmdata_DataWin_free
+    DataWin_detectVersionFromFile=gmdata_DataWin_detectVersionFromFile
+    DataWin_isVersionAtLeast=gmdata_DataWin_isVersionAtLeast
+    DataWin_bumpVersionTo=gmdata_DataWin_bumpVersionTo
+    DataWinParserOptions=gmdata_DataWinParserOptions
+    DataWinLoadType=gmdata_DataWinLoadType
+    DATAWINLOADTYPE_LOAD_PER_CHUNK=gmdata_DATAWINLOADTYPE_LOAD_PER_CHUNK
+    DATAWINLOADTYPE_LOAD_IN_MEMORY_AHEAD_OF_TIME=gmdata_DATAWINLOADTYPE_LOAD_IN_MEMORY_AHEAD_OF_TIME
+    DATAWINLOADTYPE_MAP_FILE=gmdata_DATAWINLOADTYPE_MAP_FILE
+    StringBooleanEntry=gmdata_StringBooleanEntry
+    Gen8=gmdata_Gen8
+    Optn=gmdata_Optn
+    OptnConstant=gmdata_OptnConstant
+    Language=gmdata_Language
+    Lang=gmdata_Lang
+    ExtensionFunction=gmdata_ExtensionFunction
+    ExtensionFile=gmdata_ExtensionFile
+    Extension=gmdata_Extension
+    Extn=gmdata_Extn
+    AudioEntryFlags=gmdata_AudioEntryFlags
+    AUDIO_ENTRY_FLAG_IS_EMBEDDED=gmdata_AUDIO_ENTRY_FLAG_IS_EMBEDDED
+    AUDIO_ENTRY_FLAG_IS_COMPRESSED=gmdata_AUDIO_ENTRY_FLAG_IS_COMPRESSED
+    AUDIO_ENTRY_FLAG_IS_DECOMPRESSED_ON_LOAD=gmdata_AUDIO_ENTRY_FLAG_IS_DECOMPRESSED_ON_LOAD
+    AUDIO_ENTRY_FLAG_REGULAR=gmdata_AUDIO_ENTRY_FLAG_REGULAR
+    Sound=gmdata_Sound
+    Sond=gmdata_Sond
+    AudioGroup=gmdata_AudioGroup
+    Agrp=gmdata_Agrp
+    Sprite=gmdata_Sprite
+    Sprt=gmdata_Sprt
+    Background=gmdata_Background
+    Bgnd=gmdata_Bgnd
+    RoomBackground=gmdata_RoomBackground
+    RoomView=gmdata_RoomView
+    RoomGameObject=gmdata_RoomGameObject
+    RoomTile=gmdata_RoomTile
+    SpriteInstance=gmdata_SpriteInstance
+    RoomLayerAssetsData=gmdata_RoomLayerAssetsData
+    RoomLayerBackgroundData=gmdata_RoomLayerBackgroundData
+    RoomLayerInstancesData=gmdata_RoomLayerInstancesData
+    RoomLayerTilesData=gmdata_RoomLayerTilesData
+    RoomLayer=gmdata_RoomLayer
+    Room=gmdata_Room
+    RoomChunk=gmdata_RoomChunk
+    GamePath=gmdata_GamePath
+    PathPoint=gmdata_PathPoint
+    InternalPathPoint=gmdata_InternalPathPoint
+    PathPositionResult=gmdata_PathPositionResult
+    PathChunk=gmdata_PathChunk
+    Script=gmdata_Script
+    Scpt=gmdata_Scpt
+    Glob=gmdata_Glob
+    Shader=gmdata_Shader
+    Shdr=gmdata_Shdr
+    KerningPair=gmdata_KerningPair
+    FontGlyph=gmdata_FontGlyph
+    Font=gmdata_Font
+    FontChunk=gmdata_FontChunk
+    EventAction=gmdata_EventAction
+    TimelineMoment=gmdata_TimelineMoment
+    Timeline=gmdata_Timeline
+    Tmln=gmdata_Tmln
+    ObjectEvent=gmdata_ObjectEvent
+    ObjectEventList=gmdata_ObjectEventList
+    PhysicsVertex=gmdata_PhysicsVertex
+    GameObject=gmdata_GameObject
+    Objt=gmdata_Objt
+    RoomLayerType=gmdata_RoomLayerType
+    RoomLayerType_Path=gmdata_RoomLayerType_Path
+    RoomLayerType_Background=gmdata_RoomLayerType_Background
+    RoomLayerType_Instances=gmdata_RoomLayerType_Instances
+    RoomLayerType_Assets=gmdata_RoomLayerType_Assets
+    RoomLayerType_Tiles=gmdata_RoomLayerType_Tiles
+    RoomLayerType_Effect=gmdata_RoomLayerType_Effect
+    RoomLayerType_Path2=gmdata_RoomLayerType_Path2
+    TexturePageItem=gmdata_TexturePageItem
+    Tpag=gmdata_Tpag
+    Variable=gmdata_Variable
+    Vari=gmdata_Vari
+    LocalVar=gmdata_LocalVar
+    CodeLocals=gmdata_CodeLocals
+    Function=gmdata_Function
+    Func=gmdata_Func
+    AnimCurvePoint=gmdata_AnimCurvePoint
+    AnimCurveChannel=gmdata_AnimCurveChannel
+    AnimCurve=gmdata_AnimCurve
+    Acrv=gmdata_Acrv
+    TextureGroupInfo=gmdata_TextureGroupInfo
+    Tgin=gmdata_Tgin
+    Texture=gmdata_Texture
+    Txtr=gmdata_Txtr
+    AudioEntry=gmdata_AudioEntry
+    Audo=gmdata_Audo
+    CodeEntry=gmdata_CodeEntry
+    Code=gmdata_Code
+    DetectedFormat=gmdata_DetectedFormat
+    FilterEffect=gmdata_FilterEffect
+    Feds=gmdata_Feds
+    Feat=gmdata_Feat
+    SequencePlaybackType=gmdata_SequencePlaybackType
+    SequenceChannel=gmdata_SequenceChannel
+    SequenceTrack=gmdata_SequenceTrack
+    SequenceKeyframe=gmdata_SequenceKeyframe
+    SequenceFunctionIdEntry=gmdata_SequenceFunctionIdEntry
+    Sequence=gmdata_Sequence
+    Seqn=gmdata_Seqn
+    AssetTagEntry=gmdata_AssetTagEntry
+    Tags=gmdata_Tags
+    EmbiItem=gmdata_EmbiItem
+    Embi=gmdata_Embi
+    ParticleEmitter=gmdata_ParticleEmitter
+    Psem=gmdata_Psem
+    ParticleSystem=gmdata_ParticleSystem
+    Psys=gmdata_Psys
+    Gmen=gmdata_Gmen
+    Dafl=gmdata_Dafl
+    Uilr=gmdata_Uilr
+    StatEventField=gmdata_StatEventField
+    StatEvent=gmdata_StatEvent
+    Stat=gmdata_Stat
+)
+target_link_libraries(gmdata PUBLIC bzip2)
+target_compile_options(gmdata PRIVATE -w)
+
 # Steve Reid's SHA1 implementation
 add_library(sha1 STATIC vendor/sha1/sha1.c)
 target_include_directories(sha1 SYSTEM PUBLIC vendor/sha1)
@@ -394,7 +529,7 @@ if(PLATFORM STREQUAL "cli" OR PLATFORM STREQUAL "vita")
             NAME ${VITA_APP_NAME}
         )
     else()
-        target_link_libraries(butterscotch PRIVATE ${BACKEND_LIBRARIES} ${AUDIO_LIBRARIES} ${PLATFORM_LIBRARIES})
+        target_link_libraries(butterscotch PRIVATE ${BACKEND_LIBRARIES} ${AUDIO_LIBRARIES} ${PLATFORM_LIBRARIES} gmdata)
     endif()
     if(BACKEND STREQUAL "appkit")
         target_sources(butterscotch PRIVATE src/backends/${BACKEND}.m)

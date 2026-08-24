@@ -1,0 +1,3 @@
+[submodule "vendor/libgmdata"]
+	path = vendor/libgmdata
+	url = https://github.com/emiyl/libgmdata.git

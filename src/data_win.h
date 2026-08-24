@@ -8,7 +8,60 @@
 #include "stdio_compat.h"
 #include "string_compat.h"
 
+#define DataWin ButterscotchDataWin
+#define DataWin_loadFile ButterscotchDataWin_loadFile
+#define DataWin_parseWithOptions ButterscotchDataWin_parseWithOptions
+#define DataWin_parse ButterscotchDataWin_parse
+#define DataWin_free ButterscotchDataWin_free
+#define DataWin_isVersionAtLeast ButterscotchDataWin_isVersionAtLeast
+#define DataWin_bumpVersionTo ButterscotchDataWin_bumpVersionTo
+#define DataWinParserOptions ButterscotchDataWinParserOptions
+#define DataWinLoadType ButterscotchDataWinLoadType
+#define StringBooleanEntry ButterscotchStringBooleanEntry
+#define GamePath ButterscotchGamePath
+#define PathPoint ButterscotchPathPoint
+#define InternalPathPoint ButterscotchInternalPathPoint
+#define PathPositionResult ButterscotchPathPositionResult
+#define RoomLayerType_Path ButterscotchRoomLayerType_Path
+#define RoomLayerType_Background ButterscotchRoomLayerType_Background
+#define RoomLayerType_Instances ButterscotchRoomLayerType_Instances
+#define RoomLayerType_Assets ButterscotchRoomLayerType_Assets
+#define RoomLayerType_Tiles ButterscotchRoomLayerType_Tiles
+#define RoomLayerType_Effect ButterscotchRoomLayerType_Effect
+#define RoomLayerType_Path2 ButterscotchRoomLayerType_Path2
+
 #include "utils.h"
+#undef StringBooleanEntry
+#include "gmdata.h"
+#undef DataWin
+#undef DataWin_loadFile
+#undef DataWin_parseWithOptions
+#undef DataWin_parse
+#undef DataWin_free
+#undef DataWin_isVersionAtLeast
+#undef DataWin_bumpVersionTo
+#undef DataWinParserOptions
+#undef DataWinLoadType
+#undef GamePath
+#undef PathPoint
+#undef InternalPathPoint
+#undef PathPositionResult
+#undef RoomLayerType_Path
+#undef RoomLayerType_Background
+#undef RoomLayerType_Instances
+#undef RoomLayerType_Assets
+#undef RoomLayerType_Tiles
+#undef RoomLayerType_Effect
+#undef RoomLayerType_Path2
+
+typedef struct {
+    char* key;
+    bool value;
+} StringBooleanEntry;
+
+typedef ButterscotchDataWin gmdata_DataWin;
+typedef ButterscotchDataWinParserOptions gmdata_DataWinParserOptions;
+typedef ButterscotchDataWinLoadType gmdata_DataWinLoadType;
 
 // Forward declaration for progress callback
 typedef struct DataWin DataWin;
