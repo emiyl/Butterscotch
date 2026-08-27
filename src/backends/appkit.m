@@ -707,3 +707,11 @@ void platformSleepUntil(uint64_t time) {
         YIELD();
     }
 }
+
+void platformShowErrorDialogue(const char *message) {
+    NSAlert *alert = [[NSAlert alloc] init];
+    [alert setMessageText:@"Error"];
+    [alert setInformativeText:[NSString stringWithUTF8String:message]];
+    [alert addButtonWithTitle:@"OK"];
+    [alert runModal];
+}
