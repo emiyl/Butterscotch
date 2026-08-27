@@ -1894,19 +1894,17 @@ static RValue builtin_show_error(VMContext* ctx, RValue* args, int32_t argCount)
                  "FATAL ERROR in %s compilation\n\nShader Name: %s\n\n%s\n",
                  shaderType, codeName, raw_error_msg);
     } else if (ctx->currentEventType == 100000) { // Timeline event
-        int32_t actionNumber = 1;
         int32_t timeStep = 0;
         if (ctx->currentInstance != nullptr) {
             timeStep = (int32_t) ctx->currentInstance->timelinePosition;
         }
         snprintf(formattedHeader, sizeof(formattedHeader),
-                 "ERROR in action number %d\nat time step%d of time line %s:\n%s",
-                 actionNumber, timeStep, timelineName, raw_error_msg);
+                 "ERROR in action number ?\nat time step%d of time line %s:\n%s",
+                 timeStep, timelineName, raw_error_msg);
     } else { // Other events
-        int32_t actionNumber = 1;
         snprintf(formattedHeader, sizeof(formattedHeader),
-                 "ERROR in action number %d\nof %s for object %s:\n%s",
-                 actionNumber, eventName, objectName, raw_error_msg);
+                 "ERROR in action number ?\nof %s for object %s:\n%s",
+                 eventName, objectName, raw_error_msg);
     }
 
     size_t totalLen = strlen(formattedHeader) + 1;
