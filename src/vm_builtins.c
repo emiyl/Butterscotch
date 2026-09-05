@@ -1399,6 +1399,9 @@ void VMBuiltins_setVariable(VMContext* ctx, Instance* inst, int16_t builtinVarId
         case BUILTIN_VAR_VISIBLE:
             if (inst == nullptr) break;
             inst->visible = RValue_toBool(val);
+            if (runner != nullptr) {
+                runner->drawableListSortDirty = true;
+            }
             return;
         case BUILTIN_VAR_DEPTH: {
             if (inst == nullptr) break;
@@ -8220,7 +8223,7 @@ static RValue builtin_instance_find(VMContext* ctx, RValue* args, int32_t argCou
     int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
     for (int32_t i = snapBase; snapEnd > i; i++) {
         Instance* inst = runner->instanceSnapshots[i];
-        if (!inst->active) continue;
+        if (inst == nullptr || inst->destroyed || !inst->active) continue;
         if (count == n) { resultId = inst->instanceId; break; }
         count++;
     }
@@ -8240,7 +8243,7 @@ static RValue builtin_instance_nearest(VMContext* ctx, RValue* args, int32_t arg
     int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
     for (int32_t i = snapBase; snapEnd > i; i++) {
         Instance* inst = runner->instanceSnapshots[i];
-        if (!inst->active) continue;
+        if (inst == nullptr || inst->destroyed || !inst->active) continue;
 
         GMLReal dx = inst->x - x;
         GMLReal dy = inst->y - y;
@@ -8264,13 +8267,14 @@ static RValue builtin_instance_exists(VMContext* ctx, RValue* args, int32_t argC
         int32_t snapBase = Runner_pushInstancesOfObject(runner, id);
         int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
         for (int32_t i = snapBase; snapEnd > i; i++) {
-            if (runner->instanceSnapshots[i]->active) { found = true; break; }
+            Instance* inst = runner->instanceSnapshots[i];
+            if (inst != nullptr && !inst->destroyed && inst->active) { found = true; break; }
         }
         Runner_popInstanceSnapshot(runner, snapBase);
     } else {
         // Instance ID: search for a specific instance
         Instance* inst = hmget(runner->instancesById, id);
-        found = (inst != nullptr && inst->active);
+        found = (inst != nullptr && !inst->destroyed && inst->active);
     }
     return RValue_makeBool(found);
 }
@@ -8292,12 +8296,12 @@ static RValue builtin_instance_destroy(VMContext* ctx, RValue* args, int32_t arg
         int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
         for (int32_t i = snapBase; snapEnd > i; i++) {
             Instance* inst = runner->instanceSnapshots[i];
-            if (inst->active) Runner_destroyInstance(runner, inst, runDestroyEvent);
+            if (inst != nullptr && !inst->destroyed && inst->active) Runner_destroyInstance(runner, inst, runDestroyEvent);
         }
         Runner_popInstanceSnapshot(runner, snapBase);
     } else {
         Instance* inst = hmget(runner->instancesById, id);
-        if (inst != nullptr && inst->active) Runner_destroyInstance(runner, inst, runDestroyEvent);
+        if (inst != nullptr && !inst->destroyed && inst->active) Runner_destroyInstance(runner, inst, runDestroyEvent);
     }
     return RValue_makeUndefined();
 }

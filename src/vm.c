@@ -495,7 +495,8 @@ Instance* VM_findInstanceByTarget(VMContext* ctx, int32_t target) {
         Instance** bucket = runner->instancesByObject[target];
         int32_t bucketCount = (int32_t) arrlen(bucket);
         for (int32_t i = 0; bucketCount > i; i++) {
-            if (bucket[i]->active) return bucket[i];
+            Instance* candidate = bucket[i];
+            if (candidate != nullptr && candidate->active && !candidate->destroyed) return candidate;
         }
     }
     return nullptr;
@@ -2367,7 +2368,7 @@ static void handlePushEnv(VMContext* ctx, uint32_t instr, uint32_t instrAddr) {
     if (target >= INSTANCE_ID_BASE) {
         // Instance ID - find specific instance
         Instance* inst = hmget(runner->instancesById, target);
-        if (inst != nullptr && inst->active) {
+        if (inst != nullptr && inst->active && !inst->destroyed) {
             switchToInstance(ctx, inst);
             return;
         }
@@ -2406,11 +2407,11 @@ static void handlePopEnv(VMContext* ctx, uint32_t instr, uint32_t instrAddr) {
         frame->currentIndex++;
         Instance* nextInst = frame->instanceList[frame->currentIndex];
         // Skip destroyed instances
-        while (!nextInst->active && arrlen(frame->instanceList) > frame->currentIndex + 1) {
+        while ((nextInst == nullptr || !nextInst->active || nextInst->destroyed) && arrlen(frame->instanceList) > frame->currentIndex + 1) {
             frame->currentIndex++;
             nextInst = frame->instanceList[frame->currentIndex];
         }
-        if (nextInst->active) {
+        if (nextInst != nullptr && nextInst->active && !nextInst->destroyed) {
             switchToInstance(ctx, nextInst);
             // Jump back to the start of the with-block body
             int32_t jumpOffset = instrJumpOffset(instr);

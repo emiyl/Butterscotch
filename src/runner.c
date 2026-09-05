@@ -148,8 +148,14 @@ int32_t Runner_pushInstancesOfObject(Runner* runner, int32_t targetObjIndex) {
 
     if (targetObjIndex == INSTANCE_ALL) {
         int32_t instanceCount = (int32_t) arrlen(runner->instances);
-        arrsetlen(runner->instanceSnapshots, base + instanceCount);
-        memcpy(&runner->instanceSnapshots[base], runner->instances, (size_t) instanceCount * sizeof(Instance*));
+        if (instanceCount <= 0) return base;
+
+        arrsetlen(runner->instanceSnapshots, base);
+        repeat(instanceCount, i) {
+            Instance* inst = runner->instances[i];
+            if (inst == nullptr || inst->destroyed) continue;
+            arrput(runner->instanceSnapshots, inst);
+        }
         return base;
     }
 
@@ -162,8 +168,11 @@ int32_t Runner_pushInstancesOfObject(Runner* runner, int32_t targetObjIndex) {
     if (0 >= sourceCount)
         return base;
 
-    arrsetlen(runner->instanceSnapshots, base + sourceCount);
-    memcpy(&runner->instanceSnapshots[base], source, (size_t) sourceCount * sizeof(Instance*));
+    repeat(sourceCount, i) {
+        Instance* inst = source[i];
+        if (inst == nullptr || inst->destroyed) continue;
+        arrput(runner->instanceSnapshots, inst);
+    }
     return base;
 }
 
@@ -180,13 +189,16 @@ int32_t Runner_pushInstancesForTarget(Runner* runner, int32_t target) {
         int32_t total = (int32_t) arrlen(runner->instances);
         if (0 >= total)
             return base;
-        arrsetlen(runner->instanceSnapshots, base + total);
-        memcpy(&runner->instanceSnapshots[base], runner->instances, (size_t) total * sizeof(Instance*));
+        repeat(total, i) {
+            Instance* inst = runner->instances[i];
+            if (inst == nullptr || inst->destroyed) continue;
+            arrput(runner->instanceSnapshots, inst);
+        }
         return base;
     }
     if (target >= INSTANCE_ID_BASE) {
         Instance* inst = hmget(runner->instancesById, target);
-        if (inst != nullptr) arrput(runner->instanceSnapshots, inst);
+        if (inst != nullptr && !inst->destroyed) arrput(runner->instanceSnapshots, inst);
         return base;
     }
     return base;
@@ -530,7 +542,7 @@ void Runner_executeEventForAll(Runner* runner, int32_t eventType, int32_t eventS
         {
         repeat(snapshotCount, i) {
             Instance* inst = scratch[i];
-            if (!inst->active) continue;
+            if (inst == nullptr || inst->destroyed || !inst->active) continue;
             Runner_executeEvent(runner, inst, eventType, eventSubtype);
         }
         }
@@ -545,7 +557,7 @@ void Runner_executeEventForAll(Runner* runner, int32_t eventType, int32_t eventS
 
     repeat(count, i) {
         Instance* inst = scratch[i];
-        if (!inst->active) continue;
+        if (inst == nullptr || inst->destroyed || !inst->active) continue;
         // Skip non-responders without entering Runner_executeEvent. ResolvedEventTable_lookup is a tiny CSR scan; non-responders bail in a few compares and avoid the VM state save/restore overhead inside Runner_executeEventFromObject.
         int32_t ownerObjectIndex = -1;
         int32_t codeId = ResolvedEventTable_lookup(&runner->eventTable, inst->objectIndex, slot, &ownerObjectIndex);
@@ -709,7 +721,7 @@ static void fireDrawSubtype(Runner* runner, Drawable* drawables, int32_t drawabl
             continue;
 
         Instance* inst = d->instance;
-        if (!inst->active || !inst->visible)
+        if (inst == nullptr || inst->destroyed || !inst->active || !inst->visible)
             continue;
 
         int32_t ownerObjectIndex = -1;
@@ -822,6 +834,7 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
         int32_t instanceCount = (int32_t) arrlen(runner->instances);
         repeat(instanceCount, i) {
             Instance* inst = runner->instances[i];
+            if (inst == nullptr || inst->destroyed) continue;
             Drawable d;
             ZERO_STRUCT(d);
             d.type = DRAWABLE_INSTANCE;
@@ -989,8 +1002,8 @@ void Runner_draw(Runner* runner) {
             }
         } else if (d->type == DRAWABLE_INSTANCE) {
             Instance* inst = d->instance;
-            // Filter inactive/invisible instances at draw time so the cache doesn't need invalidation when those flags toggle.
-            if (!inst->active || !inst->visible) continue;
+            // Filter stale/inactive/invisible instances at draw time so the cache never renders destroyed entries left behind by a prior executor mutation or delayed cleanup.
+            if (inst == nullptr || inst->destroyed || !inst->active || !inst->visible) continue;
 
             int32_t ownerObjectIndex = -1;
             int32_t codeId = findEventCodeIdAndOwner(runner, inst->objectIndex, EVENT_DRAW, DRAW_NORMAL, &ownerObjectIndex);
@@ -2572,6 +2585,14 @@ void Runner_destroyInstance(MAYBE_UNUSED Runner* runner, Instance* inst, bool ru
     if (inst->destroyed)
         return;
     inst->destroyed = true;
+    if (runner != nullptr) {
+        Runner_removeInstanceFromObjectLists(runner, inst);
+        Runner_removeInstanceLayerElement(runner, inst->instanceId);
+        // if (runner->instancesById != nullptr) {
+        //     hmdel(runner->instancesById, inst->instanceId);
+        // }
+        runner->drawableListStructureDirty = true;
+    }
     if (runDestroyEvent)
         Runner_executeEvent(runner, inst, EVENT_DESTROY, 0);
     Runner_executeEvent(runner, inst, EVENT_CLEANUP, 0);
