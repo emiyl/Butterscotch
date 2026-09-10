@@ -225,6 +225,29 @@ static inline void bsGetDirname(char* path) {
     }
 }
 
+static inline char* bsGetBasename(const char* path) {
+    if (path == nullptr || *path == '\0') {
+        return safeStrdup("");
+    }
+
+    const char* lastSlash = strrchr(path, '/');
+#ifdef _WIN32
+    const char* lastBackslash = strrchr(path, '\\');
+#endif
+    const char* lastSeparator = lastSlash;
+#ifdef _WIN32
+    if (lastBackslash != nullptr && (lastSeparator == nullptr || lastBackslash > lastSeparator)) {
+        lastSeparator = lastBackslash;
+    }
+#endif
+
+    if (lastSeparator == nullptr || lastSeparator[1] == '\0') {
+        return safeStrdup(path);
+    }
+
+    return safeStrdup(lastSeparator + 1);
+}
+
 #define shcopyFromTo(src, dst)                        \
 do {                                        \
 (dst) = NULL;                           \

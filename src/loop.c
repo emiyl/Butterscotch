@@ -1429,32 +1429,46 @@ int loop(CommandLineArgs args, const char *argv0) {
             }
 
             if (dataWinFilename == nullptr) {
-                logError("Runner: Launch parameters '%s' did not contain a '-game <file>' entry! Shutting down...\n", nextLaunchParameters);
-                free(nextWorkingDirectory);
-                free(nextLaunchParameters);
-                free(currentDataWinPath);
-                repeat(arrlen(newArguments), i) {
-                    free(newArguments[i]);
+                dataWinFilename = bsGetBasename(currentDataWinPath);
+                if (dataWinFilename == nullptr || dataWinFilename[0] == '\0') {
+                    logError("Runner: Launch parameters '%s' did not contain a '-game <file>' entry and no current data.win basename is available! Shutting down...\n", nextLaunchParameters);
+                    free(nextWorkingDirectory);
+                    free(nextLaunchParameters);
+                    free(currentDataWinPath);
+                    repeat(arrlen(newArguments), i) {
+                        free(newArguments[i]);
+                    }
+                    arrfree(newArguments);
+                    {
+                    repeat(arrlen(currentGameArgs), i) {
+                        free(currentGameArgs[i]);
+                    }
+                    }
+                    arrfree(currentGameArgs);
+                    return 1;
                 }
-                arrfree(newArguments);
-                {
-                repeat(arrlen(currentGameArgs), i) {
-                    free(currentGameArgs[i]);
-                }
-                }
-                arrfree(currentGameArgs);
-                return 1;
+                logWarn("Runner: Launch parameters '%s' did not contain a '-game <file>' entry; reusing the current file name '%s' for game_change.\n", nextLaunchParameters, dataWinFilename);
             }
 
             // Get the parent directory of the main data.win file
             char* parentDir = safeStrdup(currentDataWinPath);
             bsGetDirname(parentDir);
 
-            // The pendingWorkingDirectory contains a slash at the beginning of it (example: /chapter3)
-            // The parentDir does NOT have a trailing slash, so we don't need to bother with it
-            size_t newPathLen = strlen(parentDir) + strlen(nextWorkingDirectory) + 1 + strlen(dataWinFilename) + 1;
+            // GameMaker may pass the chapter path as either "chapterX" or "/chapterX".
+            // Normalize it so the path join always preserves a directory separator between parent folder and chapter directory
+            const char* normalizedWorkingDir = nextWorkingDirectory;
+            while (*normalizedWorkingDir == '/' || *normalizedWorkingDir == '\\') {
+                normalizedWorkingDir++;
+            }
+            bool needParentSeparator = parentDir[0] != '\0' && parentDir[strlen(parentDir) - 1] != '/' && parentDir[strlen(parentDir) - 1] != '\\';
+            bool needWorkingSeparator = normalizedWorkingDir[0] != '\0';
+            size_t newPathLen = strlen(parentDir) + (needParentSeparator ? 1 : 0) + strlen(normalizedWorkingDir) + (needWorkingSeparator ? 1 : 0) + strlen(dataWinFilename) + 1;
             char* newPath = (char *)safeMalloc(newPathLen);
-            snprintf(newPath, newPathLen, "%s%s/%s", parentDir, nextWorkingDirectory, dataWinFilename);
+            if (normalizedWorkingDir[0] == '\0') {
+                snprintf(newPath, newPathLen, "%s%s%s", parentDir, needParentSeparator ? "/" : "", dataWinFilename);
+            } else {
+                snprintf(newPath, newPathLen, "%s%s%s/%s", parentDir, needParentSeparator ? "/" : "", normalizedWorkingDir, dataWinFilename);
+            }
 
             free(parentDir);
             free(currentDataWinPath);

@@ -655,11 +655,19 @@ static bool performGameChange(const char* workingDirectory, char* launchParamete
     char* parentDir = safeStrdup(gCurrentDataWinPath);
     bsGetDirname(parentDir);
 
-    // The pendingWorkingDirectory contains a slash at the beginning of it (example: /chapter3)
-    // The parentDir does NOT have a trailing slash, so we don't need to bother with it
-    size_t newPathLen = strlen(parentDir) + strlen(workingDirectory) + 1 + strlen(dataWinFilename) + 1;
+    const char* normalizedWorkingDir = workingDirectory;
+    while (*normalizedWorkingDir == '/' || *normalizedWorkingDir == '\\') {
+        normalizedWorkingDir++;
+    }
+    bool needParentSeparator = parentDir[0] != '\0' && parentDir[strlen(parentDir) - 1] != '/' && parentDir[strlen(parentDir) - 1] != '\\';
+    bool needWorkingSeparator = normalizedWorkingDir[0] != '\0';
+    size_t newPathLen = strlen(parentDir) + (needParentSeparator ? 1 : 0) + strlen(normalizedWorkingDir) + (needWorkingSeparator ? 1 : 0) + strlen(dataWinFilename) + 1;
     char* newPath = safeMalloc(newPathLen);
-    snprintf(newPath, newPathLen, "%s%s/%s", parentDir, workingDirectory, dataWinFilename);
+    if (normalizedWorkingDir[0] == '\0') {
+        snprintf(newPath, newPathLen, "%s%s%s", parentDir, needParentSeparator ? "/" : "", dataWinFilename);
+    } else {
+        snprintf(newPath, newPathLen, "%s%s%s/%s", parentDir, needParentSeparator ? "/" : "", normalizedWorkingDir, dataWinFilename);
+    }
 
     free(parentDir);
 
