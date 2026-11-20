@@ -1101,7 +1101,7 @@ int loop(CommandLineArgs args, const char *argv0) {
                     Runner_setPaused(runner, !isPaused);
                 } else if (pauseHoldStartTime != 0) {
                     uint64_t pauseHoldDuration = frameStartNow - pauseHoldStartTime;
-                    if (pauseHoldDuration >= 0500000000ULL) {
+                    if (pauseHoldDuration >= 1000000000ULL) {
                         showQuittingText = true;
                     }
                     if (pauseHoldDuration >= 1500000000ULL) {
