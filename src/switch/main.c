@@ -12,20 +12,54 @@
 #include <SDL3/SDL_main.h>
 #endif
 
+typedef enum DataWinLocation {
+    DATAWIN_LOCATION_NONE,
+    DATAWIN_LOCATION_SDMC,
+    DATAWIN_LOCATION_ROMFS
+} DataWinLocation;
+
+bool romFsInitSucceeded = false;
+bool sdmcMountSucceeded = false;
+
+DataWinLocation GetDataWinLoadType() {
+    Result res;
+    struct stat s;
+
+    printf("Initializing RomFS...\n");
+    res = romfsInit();
+    if (R_SUCCEEDED(res)) {
+        romFsInitSucceeded = true;
+        printf("RomFS initialized successfully.\n");
+        if (stat("romfs:/data.win", &s) == 0) {
+            printf("Found data.win in RomFS.\n");
+            return DATAWIN_LOCATION_ROMFS;
+        }
+    } else {
+        printf("Failed to initialize RomFS: 0x%x\n", res);
+    }
+
+    printf("Initializing SDMC...\n");
+    res = fsdevMountSdmc();
+    if (R_SUCCEEDED(res)) {
+        printf("SDMC initialized successfully.\n");
+        sdmcMountSucceeded = true;
+        if (stat("sdmc:/switch/butterscotch/data.win", &s) == 0) {
+            printf("Found data.win in SDMC.\n");
+            return DATAWIN_LOCATION_SDMC;
+        }
+    } else {
+        printf("Failed to initialize SDMC: 0x%x\n", res);
+    }
+
+    return DATAWIN_LOCATION_NONE;
+}
+
 int main(int argc, char* argv[]) {
     (void)argc;
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
 
-    fsdevMountSdmc();
-
-    bool hasDataWinInRomfs = false;
-    Result rc = romfsInit();
-    bool usingRomfs = R_SUCCEEDED(rc);
-    if (usingRomfs) {
-        struct stat romfsStat;
-        hasDataWinInRomfs = (stat("romfs:/data.win", &romfsStat) == 0);
-    }
+    DataWinLocation dataWinLocation = GetDataWinLoadType();
 
     CommandLineArgs args = {0};
 
@@ -43,12 +77,28 @@ int main(int argc, char* argv[]) {
 #else
     args.renderer = SOFTWARE;
 #endif
-    args.dataWinPath = hasDataWinInRomfs ? "romfs:/data.win" : "sdmc:/switch/butterscotch/data.win";
-    args.saveFolder = "sdmc:/switch/butterscotch";
+    switch (dataWinLocation) {
+        case DATAWIN_LOCATION_SDMC:
+            args.dataWinPath = "sdmc:/switch/butterscotch/data.win";
+            break;
+        case DATAWIN_LOCATION_ROMFS:
+            args.dataWinPath = "romfs:/data.win";
+            break;
+        default:
+            args.dataWinPath = "";
+            break;
+    }
+    if (sdmcMountSucceeded) {
+        args.saveFolder = "sdmc:/switch/butterscotch";
+    } else {
+        args.saveFolder = "";
+    }
+
+    consoleExit(NULL);
 
     int ret = loop(args, argv[0]);
     freeCommandLineArgs(&args);
-    if (usingRomfs) romfsExit();
-    fsdevUnmountAll();
+    if (sdmcMountSucceeded) fsdevUnmountDevice("sdmc");
+    if (romFsInitSucceeded) romfsExit();
     return ret;
 }
