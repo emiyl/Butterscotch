@@ -6,6 +6,22 @@
 
 #define LOG_BUFFER_SIZE 1024
 
+static FILE* switchLogFile = NULL;
+
+void switchOpenLogFile(const char* logPath) {
+    switchLogFile = fopen(logPath, "w");
+    if (switchLogFile != NULL) {
+        setbuf(switchLogFile, NULL);
+    }
+}
+
+void switchCloseLogFile(void) {
+    if (switchLogFile != NULL) {
+        fclose(switchLogFile);
+        switchLogFile = NULL;
+    }
+}
+
 void platformLog(const logType type, const char *format, va_list va) {
     const char* colourPrefix = ANSI_COLOUR_CODE_RESET;
     const char* textPrefix = "";
@@ -35,6 +51,9 @@ void platformLog(const logType type, const char *format, va_list va) {
     buffer[sizeof(buffer) - 1] = '\0';
     
     printf("%s%s%s", colourPrefix, buffer, ANSI_COLOUR_CODE_RESET);
-    
+    if (switchLogFile != NULL) {
+        fputs(buffer, switchLogFile);
+    }
+
     svcOutputDebugString(buffer, strlen(buffer));
 }
