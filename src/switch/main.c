@@ -25,7 +25,7 @@ void switchCloseLogFile(void);
 
 bool romFsInitSucceeded = false;
 bool sdmcMountSucceeded = false;
-static char dataWinPath[128];
+static char dataWinPath[1024];
 
 static bool GetExecutableFolder(const char* argv0, char* folder, size_t folderSize) {
     if (argv0 == NULL || strncmp(argv0, "sdmc:", 5) != 0) return false;
@@ -46,18 +46,22 @@ DataWinLocation GetDataWinLoadType(const char* executableFolder) {
     struct stat s;
     char logPath[1024];
     bool foundRomFsDataWin = false;
+    bool foundSdmcDataWin = false;
 
     printf("Checking SDMC...\n");
     if (fsdevGetDeviceFileSystem("sdmc") != NULL) {
-        printf("SDMC initialized successfully.\n");
+        printf("SDMC is mounted.\n");
         sdmcMountSucceeded = true;
+    } else {
+        printf("SDMC is not mounted.\n");
+    }
+
+    if (sdmcMountSucceeded) {
         mkdir("sdmc:/switch", 0777);
         mkdir("sdmc:/switch/butterscotch", 0777);
         if (snprintf(logPath, sizeof(logPath), "sdmc:/switch/butterscotch/log.txt") < (int)sizeof(logPath)) {
             switchOpenLogFile(logPath);
         }
-    } else {
-        printf("SDMC is not mounted.\n");
     }
 
     printf("Initializing RomFS...\n");
@@ -77,17 +81,22 @@ DataWinLocation GetDataWinLoadType(const char* executableFolder) {
         snprintf(dataWinPath, sizeof(dataWinPath), "romfs:/data.win");
         return DATAWIN_LOCATION_ROMFS;
     }
+
     if (sdmcMountSucceeded && executableFolder != NULL &&
         snprintf(dataWinPath, sizeof(dataWinPath), "%s/data.win", executableFolder) < (int)sizeof(dataWinPath) &&
         stat(dataWinPath, &s) == 0) {
-        printf("Found data.win beside the NRO.\n");
-        return DATAWIN_LOCATION_SDMC;
+        foundSdmcDataWin = true;
     }
     if (sdmcMountSucceeded &&
+        !foundSdmcDataWin && 
         stat("sdmc:/switch/butterscotch/data.win", &s) == 0) {
-        printf("Found data.win in SDMC.\n");
         snprintf(dataWinPath, sizeof(dataWinPath),
             "sdmc:/switch/butterscotch/data.win");
+        foundSdmcDataWin = true;
+    }
+
+    if (foundSdmcDataWin) {
+        printf("Found data.win: %s\n", dataWinPath);
         return DATAWIN_LOCATION_SDMC;
     }
 
@@ -98,8 +107,6 @@ int main(int argc, char* argv[]) {
     (void)argc;
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
-
-    consoleInit(NULL);
 
     printf("Starting application...\n");
 
@@ -135,24 +142,19 @@ int main(int argc, char* argv[]) {
         default:
             args.dataWinPath = "";
             printf("No valid data.win location found.\n");
-            consoleUpdate(NULL);
-            sleep(5);
             break;
     }
+
     if (sdmcMountSucceeded) {
         args.saveFolder = "sdmc:/switch/butterscotch";
     } else {
         args.saveFolder = "";
     }
 
-    consoleUpdate(NULL);
-    consoleExit(NULL);
-
     int ret = loop(args, argv[0]);
     freeCommandLineArgs(&args);
-    if (sdmcMountSucceeded) {
+    if (sdmcMountSucceeded)
         switchCloseLogFile();
-    }
     if (romFsInitSucceeded) romfsExit();
     return ret;
 }
