@@ -28,6 +28,17 @@ bool SwitchInput_checkPausePressed(void) {
     return pressed;
 }
 
+bool SwitchInput_checkPauseHeld(void) {
+    for (int i = 0; i < SWITCH_NPAD_COUNT; i++) {
+        if (padIsConnected(&pads[i]) &&
+            (pads[i].buttons_cur & HidNpadButton_Minus) &&
+            (pads[i].buttons_cur & HidNpadButton_Plus)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void mapLibnxToGml(GamepadSlot* slot, PadState* pad, u64 cur) {
     if (cur & HidNpadButton_A) slot->buttonDown[0] = true;
     if (cur & HidNpadButton_B) slot->buttonDown[1] = true;

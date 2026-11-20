@@ -1060,6 +1060,9 @@ int loop(CommandLineArgs args, const char *argv0) {
         bool freeCamActive = false;
         bool actuallyShuttingDown = false;
         bool wasPaused = false;
+        bool pauseHoldWasDown = false;
+        uint64_t pauseHoldStartTime = 0;
+        bool showQuittingText = false;
         uint64_t lastFrameTime = nowNanos();
         uint64_t lastFrameStartTime = lastFrameTime; // for delta_time
         bool shouldWindowClose = false;
@@ -1087,17 +1090,35 @@ int loop(CommandLineArgs args, const char *argv0) {
                 continue;
             }
             
-            bool pausePressed = RunnerKeyboard_checkPressed(runner->keyboard, VK_F8);
+            bool pauseHeld = RunnerKeyboard_check(runner->keyboard, VK_F8);
 #ifdef PLATFORM_SWITCH
-            pausePressed |= SwitchInput_checkPausePressed();
+            pauseHeld |= SwitchInput_checkPauseHeld();
 #endif
-            if (pausePressed) {
-                bool isPaused = Runner_isPaused(runner);
-                Runner_setPaused(runner, !isPaused);
+            if (pauseHeld) {
+                if (!pauseHoldWasDown) {
+                    pauseHoldStartTime = frameStartNow;
+                    bool isPaused = Runner_isPaused(runner);
+                    Runner_setPaused(runner, !isPaused);
+                } else if (pauseHoldStartTime != 0) {
+                    uint64_t pauseHoldDuration = frameStartNow - pauseHoldStartTime;
+                    if (pauseHoldDuration >= 0500000000ULL) {
+                        showQuittingText = true;
+                    }
+                    if (pauseHoldDuration >= 1500000000ULL) {
+                        runner->shouldExit = true;
+                    }
+                }
+            } else {
+                pauseHoldStartTime = 0;
+                showQuittingText = false;
             }
+            pauseHoldWasDown = pauseHeld;
             bool enteringPause = runner->paused && !wasPaused;
             bool shouldStep = !runner->paused;
             bool shouldRender = !runner->paused || enteringPause;
+            if (showQuittingText) {
+                shouldRender = true;
+            }
             if (runner->debugMode && runner->paused) {
                 shouldStep = RunnerKeyboard_checkPressed(runner->keyboard, 'O');
                 if (shouldStep) {
@@ -1418,7 +1439,7 @@ int loop(CommandLineArgs args, const char *argv0) {
                 }
             }
 
-            if (runner->paused && enteringPause && !runner->debugMode) {
+            if (runner->paused && (enteringPause || showQuittingText) && !runner->debugMode) {
                 int32_t winW = fbWidth;
                 int32_t winH = fbHeight;
 
@@ -1441,6 +1462,22 @@ int loop(CommandLineArgs args, const char *argv0) {
                 renderer->vtable->drawRectangle(renderer, rightBarLeft, middleY - barHeight / 2.0f, rightBarLeft + barWidth, middleY + barHeight / 2.0f, 0xFFFFFF, 1.0f, false);
                 renderer->vtable->drawRectangle(renderer, leftBarRight - barWidth, middleY - barHeight / 2.0f, leftBarRight, middleY + barHeight / 2.0f, 0xFFFFFF, 1.0f, false);
 
+                renderer->vtable->endGUI(renderer);
+            }
+
+            if (showQuittingText && renderer->vtable->drawTextUI != nullptr) {
+                renderer->vtable->beginGUI(renderer, fbWidth, fbHeight, 0, 0, fbWidth, fbHeight, RENDER_TARGET_HOST_FRAMEBUFFER);
+
+                int32_t savedHalign = renderer->drawHalign;
+                int32_t savedValign = renderer->drawValign;
+                renderer->drawHalign = 0;
+                renderer->drawValign = 0;
+
+                float textY = (float) fbHeight - 20.0f;
+                renderer->vtable->drawTextUI(renderer, "Quitting...", 10.0f, textY, 0.5f, 0.5f, 0.0f, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 1.0f, -1.0f);
+
+                renderer->drawHalign = savedHalign;
+                renderer->drawValign = savedValign;
                 renderer->vtable->endGUI(renderer);
             }
 
