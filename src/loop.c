@@ -33,6 +33,9 @@
 #include "runner.h"
 #include "input_recording.h"
 #include "debug_overlay.h"
+#ifdef PLATFORM_SWITCH
+#include "switch/switch_input.h"
+#endif
 #include "default_font/default_font.h"
 #if (defined(ENABLE_LEGACY_GL) || defined(ENABLE_MODERN_GL) || ((defined(USE_GLFW3) || defined(USE_GLFW2)) && defined(ENABLE_SW_RENDERER))) && \
     !defined(__EMSCRIPTEN__) && !defined(__ANDROID__) && !defined(PLATFORM_PS3) && !defined(PLATFORM_VITA) && !defined(__SWITCH__)
@@ -1084,7 +1087,11 @@ int loop(CommandLineArgs args, const char *argv0) {
                 continue;
             }
             
-            if (RunnerKeyboard_checkPressed(runner->keyboard, VK_F8)) {
+            bool pausePressed = RunnerKeyboard_checkPressed(runner->keyboard, VK_F8);
+#ifdef PLATFORM_SWITCH
+            pausePressed |= SwitchInput_checkPausePressed();
+#endif
+            if (pausePressed) {
                 bool isPaused = Runner_isPaused(runner);
                 Runner_setPaused(runner, !isPaused);
             }

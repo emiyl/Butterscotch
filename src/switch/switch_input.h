@@ -6,5 +6,6 @@
 struct Runner;
 
 bool SwitchInput_handleEvents(struct Runner* runner);
+bool SwitchInput_checkPausePressed(void);
 
 #endif

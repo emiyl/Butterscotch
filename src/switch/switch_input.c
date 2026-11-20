@@ -9,6 +9,24 @@
 
 static PadState pads[SWITCH_NPAD_COUNT];
 static bool initialized = false;
+static bool pauseComboWasDown = false;
+
+bool SwitchInput_checkPausePressed(void) {
+    bool pauseComboIsDown = false;
+
+    for (int i = 0; i < SWITCH_NPAD_COUNT; i++) {
+        if (padIsConnected(&pads[i]) &&
+            (pads[i].buttons_cur & HidNpadButton_Minus) &&
+            (pads[i].buttons_cur & HidNpadButton_Plus)) {
+            pauseComboIsDown = true;
+            break;
+        }
+    }
+
+    bool pressed = pauseComboIsDown && !pauseComboWasDown;
+    pauseComboWasDown = pauseComboIsDown;
+    return pressed;
+}
 
 static void mapLibnxToGml(GamepadSlot* slot, PadState* pad, u64 cur) {
     if (cur & HidNpadButton_A) slot->buttonDown[0] = true;
